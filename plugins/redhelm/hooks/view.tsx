@@ -412,11 +412,12 @@ export const summary = (ws: Workspace) => {
 function Wide({ els, v, act, columns, rows }: { els: Els; v: View; act: Actions; columns: number; rows: number }) {
   const { Box, Text } = els
   const strips = rack(v).filter(s => s.cocked || LIVE.has(s.agent.status))
-  const room = Math.max(0, rows - 1 - (v.setup.length ? v.setup.length + 2 : 0))
+  const room = Math.max(0, rows - 2 - (v.setup.length ? v.setup.length + 2 : 0)) // the rule and the bar
   const shown = strips.slice(0, room)
   const bays = v.workspaces.map(summary).filter(Boolean).join('   ')
   return (
     <Box flexDirection="column" width={columns}>
+      <Rule els={els} width={columns} />
       <Box justifyContent="space-between" gap={3}>
         <Box flexShrink={0}>
           <Text>
