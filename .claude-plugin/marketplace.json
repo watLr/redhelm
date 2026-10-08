@@ -1,0 +1,14 @@
+{
+  "name": "redhelm",
+  "description": "REDhelm: a live agents sidebar and model guard for Claude Code.",
+  "owner": {
+    "name": "watLr"
+  },
+  "plugins": [
+    {
+      "name": "redhelm",
+      "source": "./plugins/redhelm",
+      "description": "Live sidebar for your Claude Code agents: what they do, where their work lands, what needs you, and a model guard."
+    }
+  ]
+}

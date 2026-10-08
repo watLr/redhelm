@@ -1,0 +1,339 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+
+import type { Agent } from '../types'
+
+/** The test runtime has timers; the hooks environment's declarations leave them out. */
+declare const setTimeout: (fn: () => void, ms: number) => unknown
+import {
+  DEFAULTS, activity, settings, areas, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
+} from '../hooks/model'
+import { workspaces, type Io } from '../hooks/sources'
+import { rack, shortName, summary, type View } from '../hooks/view'
+
+const agent = (over: Partial<Agent>): Agent => ({
+  id: 'a1', name: 'docs', type: 'general-purpose', description: 'Rewrite the setup guide', status: 'running',
+  context: 0, startedAt: 0, recent: [], files: [], edits: 0, fails: 0, ...over,
+})
+
+/** An in-memory folder tree standing in for $.fs. */
+const fakeIo = (files: Record<string, string>, root = '/p'): Io => {
+  const isDir = (d: string) => Object.keys(files).some(f => f.startsWith(`${d}/`))
+  return {
+    root,
+    read: async p => {
+      if (!(p in files)) throw new Error(`missing ${p}`)
+      return files[p]!
+    },
+    stat: async p => {
+      if (!(p in files) && !isDir(p)) throw new Error(`missing ${p}`)
+      return { mtimeMs: 1 }
+    },
+    exists: async p => p in files || isDir(p),
+    list: async d => [...new Set(Object.keys(files).filter(f => f.startsWith(`${d}/`)).map(f => f.slice(d.length + 1).split('/')[0]!))]
+      .map(name => ({ name, kind: isDir(`${d}/${name}`) ? 'dir' : 'file' })),
+  }
+}
+
+describe('models', () => {
+  test('names and staleness follow the guard scripts', async () => {
+    expect(short('claude-opus-5-5[1m]')).toBe('Opus 5.5')
+    expect(short('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
+    expect(isStale('claude-opus-5[1m]', 'claude-opus-5-5')).toBe(true)
+    expect(isStale('claude-opus-5-5[1m]', 'claude-opus-5-5')).toBe(false)
+    expect(isStale('claude-haiku-4-5', 'claude-opus-5-5')).toBe(false)
+  })
+
+  test('the saved default resolves a picker alias to the newest version seen', async () => {
+    const seen = remember(remember({}, 'claude-opus-5-5[1m]'), 'claude-opus-6')
+    expect(seen).toEqual({ opus: 'claude-opus-6' })
+    expect(remember(seen, 'claude-opus-5')).toBe(seen)
+    expect(staleTarget('claude-opus-5-5[1m]', 'opus', seen)).toBe('claude-opus-6')
+    expect(staleTarget('claude-opus-6', 'opus', seen)).toBeUndefined()
+    expect(staleTarget('claude-opus-5', 'claude-opus-5-5[1m]', {})).toBe('claude-opus-5-5')
+  })
+
+  test('setup asks for pause-on-flag, never for switching models automatically', async () => {
+    const flag = DEFAULTS.find(d => d.key === 'switchModelsOnFlag')!
+    expect(flag.want(['Switch automatically', 'Ask each time'])).toBe('Ask each time')
+  })
+})
+
+describe('what agents do', () => {
+  test('tool calls read as phase, activity and changed files', async () => {
+    expect(activity('Edit', { file_path: '/p/src/app/server.ts' })).toBe('Edit server.ts')
+    expect(activity('Bash', { command: 'npm test -- --watch' })).toBe('Bash npm test')
+    expect(phase(['exploring', 'building', 'building', 'checking'])).toBe('building')
+    expect(phase(['building', 'checking'])).toBe('checking')
+    expect(kindOf('Grep')).toBe('exploring')
+  })
+
+  test('areas group changed files and overlaps flag shared files', async () => {
+    const list = [
+      agent({ id: 'a', files: ['src/guide/setup.md', 'src/app/index.ts'] }),
+      agent({ id: 'b', name: 'camera', files: ['src/guide/setup.md', 'tools/cam.mjs'] }),
+      agent({ id: 'c', status: 'completed', files: ['src/guide/setup.md'] }),
+    ]
+    expect(areas(list).map(a => [a.area, a.files.size])).toEqual([['src', 2], ['tools', 1]])
+    expect(overlaps(list)).toEqual([{ file: 'src/guide/setup.md', ids: ['a', 'b'] }])
+  })
+})
+
+describe('workflows', () => {
+  test('status-board folds to open rows, newest first', async () => {
+    const events = [
+      '{"t":"2026-10-05T20:00:00Z","id":"P1","stages":{"Done":"yes","Verified":"yes","Reviewed":"yes","Shipped":"yes"}}',
+      '{"t":"2026-10-05T20:10:00Z","id":"P2","note":"started","stages":{"Done":"doing"}}',
+      '{"t":"2026-10-05T20:20:00Z","id":"P3","note":"first","stages":{"Done":"yes"}}',
+      '{"t":"2026-10-05T20:30:00Z","id":"P4","stages":{"Done":"skip","Verified":"skip","Reviewed":"skip","Shipped":"skip"}}',
+      'not json',
+    ].join('\n')
+    const { rows, total } = foldStatusBoard(events, ['Done', 'Verified', 'Reviewed', 'Shipped'])
+    expect(total).toBe(4)
+    expect(rows.map(r => r.id)).toEqual(['P3', 'P2'])
+  })
+
+  test('lane boards count checked-done items and show the furthest open one', async () => {
+    const spec = { lanes: [{ id: 'api', title: 'API', agent: 'a1', items: [{ id: '1', title: 'Auth' }, { id: '2', title: 'Cache' }] }] }
+    const lanes = foldLanes(spec, { api: '{"item":"1","stage":"checked","status":"done"}\n{"item":"2","stage":"looked","status":"done"}' })
+    expect(lanes[0]).toEqual({ id: 'api', title: 'API', done: 1, total: 2, active: 'Cache', agent: 'a1' })
+  })
+
+  test('REDManager v1 ledgers and v2 snapshots both parse', async () => {
+    expect(parseRun('demo-run', '# REDManager state ledger\n- Run status: `ACTIVE`\n| P1 | `DISPATCHED` |')).toEqual({
+      name: 'demo-run', status: 'ACTIVE', next: undefined, open: 1,
+    })
+    expect(parseRun('x', '{"run_id":"r","status":"PAUSED","next_action":"Verify","open_attempts":[{}]}')).toEqual({
+      name: 'r', status: 'PAUSED', next: 'Verify', open: 1,
+    })
+  })
+
+  test('REDStudio standards count and newest title', async () => {
+    const md = '- **S1 · 2026-10-01 · Short labels.** text\n- **S2 · 2026-10-02 · Real content first.** text'
+    expect(parseStandards(md)).toEqual({ standards: 2, latest: 'Real content first' })
+  })
+
+  test('workspaces are found at the root and one level below', async () => {
+    const io = fakeIo({
+      '/p/app/.redstudio/standards.md': '- **S1 · 2026-10-01 · Short labels.** x',
+      '/p/app/.status-board/events.jsonl': '{"t":"2026-10-05T20:10:00Z","id":"P2","stages":{"Done":"doing"}}',
+      '/p/app/.status-board/config.json': '{"name":"Demo app","stages":["Done","Shipped"]}',
+      '/p/game/docs/aaa/board/lanes.json': '{"lanes":[{"id":"api","title":"API","items":[{"id":"1"}]}]}',
+      '/p/Plain/readme.md': 'no workflow',
+      '/p/.redmanager/state.md': '- Run status: `ACTIVE`',
+    })
+    const found = await workspaces(io)
+    expect(found.map(w => w.name)).toEqual(['p', 'Demo app', 'game'])
+    expect(found[0]!.runs?.[0]?.status).toBe('ACTIVE')
+    expect(found[1]!.studio?.standards).toBe(1)
+    expect(found[1]!.board?.rows.length).toBe(1)
+    expect(found[2]!.lanes?.[0]?.total).toBe(1)
+  })
+})
+
+const PANE = {
+  plugin: 'redhelm', component: 'Pane', requestId: 'redhelm',
+  props: { title: 'REDhelm', isFocused: true, bodyColumns: 48, placement: 'dock' },
+} as const
+
+/** Beneath REDhelm: the engine's session, spawn and tools answer without running anything. */
+const engine = (on: any, isInteractive: boolean) => async ($: any) => {
+  mock.clock(on)
+  mock.store(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.close', () => ({ value: undefined }))
+  on('classic.PostModelSwitch', () => ({}))
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { // Claude Code's own (empty) band
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  on('session.start', () => ({ cwd: '/p' }))
+  on('session.root', () => ({ value: '/p' }))
+  on('command.register', () => ({ value: { command: 'redhelm' } }))
+  on('agent.spawn', () => ({ model: 'claude-opus-5-5[1m]', agentId: 'a1' }))
+  on('tool.call', () => ({ result: 'ok' }))
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive })
+}
+
+describe('the pane', () => {
+  test('a spawned agent shows live on every surface, with messaging only where there is input', async ($, on) => {
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
+    await $.tool.call({ tool: 'Edit', file_path: 'src/guide/setup.md', old_string: 'a', new_string: 'b', agentId: 'a1' } as any)
+
+    for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+      const ui = await $.ui.mount({ ...PANE, surface } as any)
+      expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('docs')
+      expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Edit setup\.md/ })).toBeDefined()
+      await ui.press({ key: 'sel-a1' })
+      expect(await ui.find({ type: 'Text', text: /Rewrite the setup guide/ })).toBeDefined()
+      const message = await ui.find({ key: 'compose-a1' })
+      if (surface === 'mobile') expect(message).toBeUndefined()
+      else expect(message).toBeDefined()
+      await ui.press({ key: 'sel-a1' })
+      await ui.unmount()
+    }
+  })
+
+  test('stays out of sessions nobody watches (claude -p, SDK, spawned runs)', async ($, on) => {
+    await engine(on, false)($)
+    await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
+    expect(await ui.find({ key: 'sel-a1' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /No agents yet/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the bottom panel lays the rack out one line per agent, bays beside it', async ($, on) => {
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline', bodyColumns: 140 } } as any)
+    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('docs')
+    expect(await ui.find({ type: 'Text', text: /starting/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('/redhelm bottom moves the whole rack above the prompt, and /redhelm folds it', async ($, on) => {
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
+    const run = (args: string) => $.command.run({ command: 'redhelm', args, origin: { kind: 'person' }, presentation: {} } as any)
+    const band = { plugin: 'redhelm', component: 'AbovePrompt', surface: 'terminal',
+      props: { hasSurvey: false, isWorking: false, maxRows: 8, bodyColumns: 120 } } as any
+
+    expect((await run('bottom')).text).toBe('REDhelm now lives at the bottom')
+    let ui = await $.ui.mount(band)
+    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('docs')
+    await ui.unmount()
+
+    expect((await run('')).text).toBe('REDhelm folded')
+    ui = await $.ui.mount(band)
+    expect(await ui.find({ key: 'sel-a1' })).toBeUndefined()
+    await ui.unmount()
+  })
+})
+
+describe('the rack', () => {
+  test('orders strips by who needs you next and pulls out the ones that do', async () => {
+    const v = {
+      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], lanes: {},
+      agents: [
+        agent({ id: 'run', startedAt: 1 }),
+        agent({ id: 'done', status: 'completed', endedAt: 5 }),
+        agent({ id: 'asks', startedAt: 2 }),
+      ],
+      inbox: [{ id: 'm', agentId: 'asks', text: 'Ready to merge?', at: 3 }],
+    } satisfies View
+    expect(rack(v).map(s => [s.agent.id, s.cocked])).toEqual([['asks', true], ['run', false], ['done', false]])
+  })
+})
+
+describe('what REDhelm brings to Claude Code', () => {
+  /** Lets work REDhelm started without awaiting (its start-up, a pressed button) finish. */
+  const settle = () => new Promise<void>(r => setTimeout(() => r(), 40))
+
+  const ROWS: any[] = [
+    { key: 'switchModelsOnFlag', label: 'x', kind: 'choice', value: 'Switch automatically', options: ['Switch automatically', 'Ask each time'], isLocked: false },
+    { key: 'turnDuration', label: 'x', kind: 'boolean', value: false, isLocked: false },
+    { key: 'timestamps', label: 'x', kind: 'boolean', value: true, isLocked: false },
+    { key: 'inputNeededNotifEnabled', label: 'x', kind: 'boolean', value: false, isLocked: true },
+  ]
+
+  test('the setup card offers only what differs and is not locked, and Apply writes it', async ($, on) => {
+    const written: Record<string, unknown> = {}
+    on('config.list', () => ({ value: ROWS }))
+    on('config.set', (_: any, e: any) => ((written[e.key] = e.value), { value: e.value }))
+    await engine(on, true)($)
+    await settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
+    expect(await ui.find({ type: 'Text', text: /Set up REDhelm/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Timestamp every message/ })).toBeUndefined() // already on
+    expect(await ui.find({ type: 'Text', text: /phone/ })).toBeUndefined() // locked by policy
+    await ui.press({ key: 'setup-apply' })
+    await settle()
+    expect(written).toEqual({ switchModelsOnFlag: 'Ask each time', turnDuration: true })
+    expect(await ui.find({ type: 'Text', text: /Set up REDhelm/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a model switch REDhelm did not see you choose holds prompts and tools until /model', async ($, on) => {
+    on('config.list', () => ({ value: [] }))
+    on('settings.read', () => ({ value: {} }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    await engine(on, true)($)
+    const sw = (source: string, to: string) =>
+      ($ as any).classic.PostModelSwitch({ from_model: 'claude-fable-5-1', to_model: to, requested_model: null, source })
+
+    await sw('auto', 'claude-opus-4-8')
+    expect((await $.prompt.submit({ text: 'go on' } as any)).drop).toMatch(/switched models on its own/)
+    expect((await $.tool.call({ tool: 'Bash', command: 'ls' } as any)).deny).toMatch(/held/)
+
+    await sw('picker', 'claude-fable-5-1')
+    expect((await $.prompt.submit({ text: 'go on' } as any)).text).toBe('go on')
+  })
+
+  test('a session behind the saved default is stopped once, then lets you continue', async ($, on) => {
+    on('config.list', () => ({ value: [] }))
+    on('settings.read', () => ({ value: { model: 'claude-opus-6' } }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    await engine(on, true)($)
+    await ($ as any).classic.PostModelSwitch({ from_model: 'claude-opus-5', to_model: 'claude-opus-5-5', requested_model: null, source: 'resume' })
+    expect((await $.prompt.submit({ text: 'next' } as any)).drop).toMatch(/default is now Opus 6/)
+    expect((await $.prompt.submit({ text: 'next' } as any)).text).toBe('next')
+  })
+})
+
+describe('your REDhelm settings', () => {
+  test('missing or unknown values fall back to the defaults', async () => {
+    expect(settings()).toEqual({ placement: 'right', statusLine: 'off', guard: 'hold', notifyAfter: 120, autoOpen: true, agentToasts: true })
+    expect(settings({ placement: 'left', notifyAfter: -5, autoOpen: false })).toMatchObject({ placement: 'right', notifyAfter: 120, autoOpen: false })
+  })
+
+  test('guard "warn" reports a silent switch but never holds your prompt', { options: { guard: 'warn' } } as any, async ($: any, on: any) => {
+    on('config.list', () => ({ value: [] }))
+    on('settings.read', () => ({ value: {} }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    await engine(on, true)($)
+    await $.classic.PostModelSwitch({ from_model: 'claude-fable-5-1', to_model: 'claude-opus-4-8', requested_model: null, source: 'auto' })
+    expect((await $.prompt.submit({ text: 'go on' })).text).toBe('go on')
+  })
+
+  test("setup ships REDhelm's status lines into settings.json and keeps the rest of the file", async ($: any, on: any) => {
+    let written = ''
+    on('config.list', () => ({ value: [] }))
+    on('settings.read', () => ({ value: { statusLine: { type: 'command', command: 'old-line' } } }))
+    on('process.run', () => ({ value: { exitCode: 0, stdout: 'Python 3', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('env.get', () => ({ value: '/h' }))
+    on('fs.exists', () => ({ value: true }))
+    on('fs.read', () => ({ value: '{"theme":"dark","statusLine":{"type":"command","command":"old-line"}}' }))
+    on('fs.write', (_: any, e: any) => ((written = e.text ?? e[1] ?? ''), { value: undefined }))
+    await engine(on, true)($)
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /under the prompt \(replaces your current one\)/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /agent panel/ })).toBeDefined()
+    await ui.press({ key: 'setup-apply' })
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    const json = JSON.parse(written)
+    expect(json.theme).toBe('dark')
+    expect(json.statusLine.command).toMatch(/^python3 ".*\/statusline\/statusline\.py"$/)
+    expect(json.subagentStatusLine.command).toMatch(/statusline\/agents\.py"$/)
+    await ui.unmount()
+  })
+})
+
+describe('the bottom bar', () => {
+  test('long workspace names shorten to their first words', async () => {
+    expect(shortName('Demo app (web folder) — beta')).toBe('Demo app')
+    expect(shortName('Game')).toBe('Game')
+  })
+
+  test('each workspace reads as a few words', async () => {
+    expect(summary({ dir: '/p/game', name: 'Game', lanes: [{ id: 'api', title: 'API', done: 1, total: 2 }] })).toBe('Game 1/2')
+    expect(summary({
+      dir: '/p/app', name: 'Demo app (web) — beta',
+      board: { stages: ['Done'], rows: [{ id: 'P1', stages: {}, note: '', at: 0 }], total: 4 },
+      runs: [{ name: 'demo-run', status: 'ACTIVE', open: 2 }],
+    })).toBe('Demo app 1 open · demo-run active')
+  })
+})
+

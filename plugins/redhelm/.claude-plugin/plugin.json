@@ -1,0 +1,65 @@
+{
+  "name": "redhelm",
+  "version": "0.3.0",
+  "description": "Live sidebar for your agents: what they do, where their work lands, what needs you, and your workflows.",
+  "author": {
+    "name": "watLr",
+    "url": "https://github.com/watLr"
+  },
+  "homepage": "https://github.com/watLr/redhelm",
+  "repository": "https://github.com/watLr/redhelm",
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "placement": {
+      "type": "string",
+      "title": "REDhelm placement",
+      "description": "Right: a sidebar beside the conversation (falls back to a panel above the prompt when the layout cannot dock). Bottom: the rack above the prompt.",
+      "options": [
+        "right",
+        "bottom"
+      ],
+      "default": "right"
+    },
+    "statusLine": {
+      "type": "string",
+      "title": "REDhelm line under the prompt",
+      "description": "Off: nothing from REDhelm there (its own status line, from the setup card, shows the model and effort). Problems: a notice only when the model switched on its own or the session fell behind your default. Always: the model and effort too.",
+      "options": [
+        "problems",
+        "always",
+        "off"
+      ],
+      "default": "off"
+    },
+    "guard": {
+      "type": "string",
+      "title": "When the model changes without you",
+      "description": "Hold: your next prompt and Claude's tools wait until you choose with /model. Warn: say so, hold nothing. Off: do nothing.",
+      "options": [
+        "hold",
+        "warn",
+        "off"
+      ],
+      "default": "hold"
+    },
+    "notifyAfter": {
+      "type": "number",
+      "title": "Desktop notification after turns longer than (seconds)",
+      "description": "0 turns desktop notifications off.",
+      "default": 120
+    },
+    "autoOpen": {
+      "type": "boolean",
+      "title": "Open REDhelm by itself",
+      "description": "When agents start or the project has a board, REDhelm, or REDManager. /redhelm always opens it.",
+      "default": true
+    },
+    "agentToasts": {
+      "type": "boolean",
+      "title": "Pop-ups when agents finish or message you",
+      "default": true,
+      "description": "Short pop-ups in Claude Code when an agent finishes, fails, or sends you a message."
+    }
+  }
+}
