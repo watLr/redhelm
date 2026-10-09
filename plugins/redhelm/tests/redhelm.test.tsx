@@ -5,10 +5,10 @@ import type { Agent } from '../types'
 /** The test runtime has timers; the hooks environment's declarations leave them out. */
 declare const setTimeout: (fn: () => void, ms: number) => unknown
 import {
-  DEFAULTS, activity, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
+  DEFAULTS, activity, handleOf, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
 } from '../hooks/model'
 import { workspaces, type Io } from '../hooks/sources'
-import { rack, shortName, summary, type View } from '../hooks/view'
+import { label, rack, relevant, shortName, summary, type View } from '../hooks/view'
 
 const agent = (over: Partial<Agent>): Agent => ({
   id: 'a1', name: 'docs', type: 'general-purpose', description: 'Rewrite the setup guide', status: 'running',
@@ -213,7 +213,7 @@ describe('the pane', () => {
 describe('the rack', () => {
   test('orders strips by who needs you next and pulls out the ones that do', async () => {
     const v = {
-      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, lanes: {},
+      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, root: '/p', lanes: {},
       agents: [
         agent({ id: 'run', startedAt: 1 }),
         agent({ id: 'done', status: 'completed', endedAt: 5 }),
@@ -397,6 +397,32 @@ describe('messaging an agent', () => {
     expect(await ui.find({ type: 'Text', text: /Your prompt now starts with “→ docs:”/ })).toBeDefined()
     expect(await ui.find({ key: 'compose-a1' })).toBeUndefined()
     await ui.unmount()
+  })
+})
+
+describe('what REDhelm chooses to show', () => {
+  const base = { now: 0, notes: [], inbox: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, lanes: {} }
+
+  test("only this session's workflows, or ones an agent here is changing; finished runs stay quiet", async () => {
+    const ws = (dir: string, extra: object) => ({ dir, name: dir.split('/').pop()!, ...extra })
+    const v = {
+      ...base, root: '/p/app',
+      agents: [agent({ files: ['/p/lib/util.ts'] })],
+      workspaces: [
+        ws('/p/app', { board: { stages: ['Done'], rows: [{ id: 'T1', stages: {}, note: '', at: 0 }], total: 3 } }), // here
+        ws('/p/lib', { runs: [{ name: 'lib-run', status: 'ACTIVE', open: 1 }] }),                                    // an agent edits it
+        ws('/p/other', { runs: [{ name: 'other-run', status: 'ACTIVE', open: 1 }] }),                                // just nearby
+        ws('/p', { runs: [{ name: 'old-run', status: 'COMPLETED', open: 0 }] }),                                     // above, but finished
+      ],
+    } satisfies View
+    expect(relevant(v).map(w => w.name)).toEqual(['app', 'lib'])
+  })
+
+  test('agents with no name or task get a unique name that is also their address', async () => {
+    const one = agent({ id: 'a1697d99', name: '', description: '' })
+    const two = agent({ id: 'a9b6863a', name: '', description: '' })
+    expect([label(one, {}), label(two, {})]).toEqual(['Agent a169', 'Agent a9b6'])
+    expect([handleOf(one), handleOf(two)]).toEqual(['agent a169', 'agent a9b6'])
   })
 })
 

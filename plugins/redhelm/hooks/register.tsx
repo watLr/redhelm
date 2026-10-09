@@ -120,6 +120,8 @@ async function sync($: $) {
 
 /** The person's REDhelm settings (/config); a change there reloads the module with the new values. */
 let cfg: Settings = settings()
+/** The session's project root (set at session start). */
+let root = ''
 /** Off in sessions nobody watches (claude -p, SDK, spawned runs): every hook passes straight through. */
 let active = false
 /** The pane opens by itself at most once a session, and never after the person used /redhelm. */
@@ -341,6 +343,7 @@ async function view($: $): Promise<View> {
     composing: await read($, composing),
     setup: await read($, setup),
     showDone: await read($, showDone),
+    root,
     lanes: laneNames(list),
   }
 }
@@ -353,7 +356,6 @@ async function show($: $) {
 
 export const register: Register = (on, options) => {
   cfg = settings(options as Record<string, unknown>)
-  let root = ''
   let timers: { cancel: () => void }[] = []
 
   on('session.start', async ($, e, next) => {

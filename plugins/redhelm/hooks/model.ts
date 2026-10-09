@@ -125,7 +125,7 @@ export const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
  * colon or ellipsis in it, so "→ handle: message" always reads back to the same agent.
  */
 export const handleOf = (a?: Agent) => {
-  const words = (a?.name || a?.description || a?.type || 'agent').replace(/[:\n…]+/g, ' ').trim().split(/\s+/)
+  const words = (a?.name || a?.description || (a ? `agent ${a.id.slice(0, 4)}` : 'agent')).replace(/[:\n…]+/g, ' ').trim().split(/\s+/)
   let out = words[0]!.slice(0, 24)
   for (const w of words.slice(1)) {
     if (`${out} ${w}`.length > 24) break

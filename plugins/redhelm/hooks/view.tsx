@@ -35,6 +35,8 @@ export type View = {
   composing: string | null
   setup: SetupItem[]
   showDone: boolean
+  /** The session's project root, to tell this session's workflows from merely nearby ones. */
+  root: string
   lanes: Record<string, string>
 }
 
@@ -44,8 +46,9 @@ const LIVE = new Set<Agent['status']>(['pending', 'running', 'waiting'])
 
 type Strip = { agent: Agent; messages: Message[]; cocked: boolean }
 
+/** An agent's name in REDhelm; one with no name or task gets a unique one ("Agent a169"), which is also its address. */
 export const label = (a: Agent, lanes: Record<string, string>) =>
-  capital(lanes[a.id] || a.name || excerpt(a.description, 28) || a.type)
+  capital(lanes[a.id] || a.name || excerpt(a.description, 28) || `agent ${a.id.slice(0, 4)}`)
 
 /** Who needs you next: agents asking for you, then live ones by start, then the most recently finished. */
 export function rack(v: View): Strip[] {
@@ -156,16 +159,20 @@ function AgentLine({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actio
   const a = s.agent
   const open = v.selected === a.id
   const older = isStale(a.model, v.guard.stale ?? v.guard.model)
+  const toggle = () => act.select(open ? null : a.id)
   return (
     <Box flexDirection="column">
       <Box justifyContent="space-between" gap={2}>
         <Box gap={1} flexShrink={1}>
           <Text color={C.live}>●</Text>
-          <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} onPress={() => act.select(open ? null : a.id)} />
+          <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} hover={{ underline: true, scope: `row-${a.id}` }} onPress={toggle} />
           <Text wrap="truncate-end">{doing(a)}</Text>
           {older && <Text color={C.attention}>· older model</Text>}
         </Box>
-        <Text dimColor>{minutes(v.now - a.startedAt)}</Text>
+        <Box gap={2} flexShrink={0}>
+          <Text dimColor>{minutes(v.now - a.startedAt)}</Text>
+          <Button key={`more-${a.id}`} plain dimColor label={open ? '▾' : '▸'} hover={{ bold: true, scope: `row-${a.id}` }} onPress={toggle} />
+        </Box>
       </Box>
       {open && <Details els={els} s={s} v={v} act={act} />}
     </Box>
@@ -228,6 +235,20 @@ function SetupCard({ els, v, act }: { els: Els; v: View; act: Actions }) {
 const bar = (done: number, total: number, width: number) => {
   const n = total ? Math.round((done / total) * width) : 0
   return ['━'.repeat(n), '─'.repeat(width - n)] as const
+}
+
+const FINISHED_RUN = /^(complete|completed|cancelled|canceled|cleared)\b/i
+
+/**
+ * The workflows worth a line: this session's project (the folder or one above it) or one an
+ * agent here is changing files in; finished runs and boards with nothing open stay quiet.
+ */
+export function relevant(v: View): Workspace[] {
+  const inside = (dir: string, path: string) => path === dir || path.startsWith(`${dir}/`)
+  return v.workspaces
+    .filter(ws => inside(ws.dir, v.root) || v.agents.some(a => a.files.some(f => inside(ws.dir, f.startsWith('/') ? f : `${v.root}/${f}`))))
+    .map(ws => ({ ...ws, runs: ws.runs?.filter(r => r.status && !FINISHED_RUN.test(r.status)) }))
+    .filter(ws => (ws.lanes ?? []).some(l => l.total > l.done) || (ws.board?.rows.length ?? 0) > 0 || (ws.runs?.length ?? 0) > 0)
 }
 
 /** "Game 28 of 36 done", "Demo app 4 tasks open", "demo-run active" */
@@ -304,8 +325,8 @@ function Tall({ els, v, act, columns }: { els: Els; v: View; act: Actions; colum
       {!strips.length && <Text dimColor>Agents you start show up here.</Text>}
       <Finished els={els} v={v} act={act} strips={done} />
       <Overlaps els={els} v={v} />
-      {v.workspaces.length > 0 && <Rule els={els} width={columns} />}
-      {v.workspaces.map(ws => <WorkspaceLine key={`ws-${ws.dir}`} els={els} ws={ws} />)}
+      {relevant(v).length > 0 && <Rule els={els} width={columns} />}
+      {relevant(v).map(ws => <WorkspaceLine key={`ws-${ws.dir}`} els={els} ws={ws} />)}
     </Box>
   )
 }
@@ -335,7 +356,7 @@ function Wide({ els, v, act, columns, rows }: { els: Els; v: View; act: Actions;
   const shownNeeds = needs.slice(0, room)
   const shownWorking = working.slice(0, Math.max(0, room - shownNeeds.length))
   const hidden = needs.length + working.length - shownNeeds.length - shownWorking.length
-  const right = v.guard.fallback || v.guard.stale ? null : v.workspaces.map(summary).filter(Boolean).join('   ')
+  const right = v.guard.fallback || v.guard.stale ? null : relevant(v).map(summary).filter(Boolean).join('   ')
   return (
     <Box flexDirection="column" width={columns}>
       <Rule els={els} width={columns} />
