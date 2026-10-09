@@ -4,7 +4,7 @@ import type { Agent } from '../types'
 
 /** The test runtime has timers; the hooks environment's declarations leave them out. */
 declare const setTimeout: (fn: () => void, ms: number) => unknown
-import {
+import { grouped, tidyPaths,
   DEFAULTS, activity, doing, handleOf, handles, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
 } from '../hooks/model'
 import { workspaces, type Io } from '../hooks/sources'
@@ -615,6 +615,40 @@ describe('an agent still waiting on work it started', () => {
     status = 'completed'
     await clock.advance(3_000)
     expect(toasts.filter(t => /probe finished/.test(t))).toHaveLength(1)
+    await ui.unmount()
+  })
+})
+
+describe('the sheet reads cleanly', () => {
+  test('repeated steps fold into one line with a count', () => {
+    const steps = [{ text: 'Edit review.md', at: 5 }, { text: 'Edit review.md', at: 4 }, { text: 'Edit review.md', at: 3 }, { text: 'Read List.tsx', at: 2 }]
+    expect(grouped(steps)).toEqual([{ text: 'Edit review.md', at: 5, count: 3 }, { text: 'Read List.tsx', at: 2, count: 1 }])
+  })
+
+  test('paths in what agents say lose the project folder and the home folder', () => {
+    expect(tidyPaths('I rewrote /home/sam/notes-app/docs/setup.md and /home/sam/.config/x', '/home/sam/notes-app', '/home/sam'))
+      .toBe('I rewrote docs/setup.md and ~/.config/x')
+  })
+
+  test('a finished agent shows its last words once, not again as thinking', async ($: any, on: any) => {
+    let status = 'running'
+    on('agent.list', () => ({ value: [{ id: 'a7', name: 'review', description: 'Review the UI', type: 'general-purpose', status }] }))
+    on('session.messages', () => ({ value: [
+      { role: 'user', text: 'Review the UI', toolUses: [] },
+      { role: 'assistant', text: 'I wrote the review with six findings', toolUses: [] },
+    ] }))
+    on('turn.complete', () => ({ text: '' }))
+    await engine(on, true)($)
+    await clock.advance(3_000) // read back: thinking = its latest words
+    status = 'completed'
+    await $.turn.complete({ answer: 'I wrote the review with six findings', durationMs: 9000, isAborted: false, turnId: 't1', agentId: 'a7', reason: 'answer' })
+    await clock.advance(3_000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'toggle-done' })
+    const sheet = await openSheet($, ui, 'a7')
+    expect(await sheet.find({ type: 'Text', text: /Last said/ })).toBeDefined()
+    expect(await sheet.find({ type: 'Text', text: /Thinking/ })).toBeUndefined()
+    await sheet.unmount()
     await ui.unmount()
   })
 })

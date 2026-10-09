@@ -1,7 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { Agent, Guard, Message, Note, SetupItem, Workspace } from '../types'
-import { capital, doing, excerpt, handleOf, isStale, kilo, minutes, modelWords, overlaps, short } from './model'
+import { capital, doing, excerpt, grouped, handleOf, isStale, kilo, minutes, modelWords, overlaps, short } from './model'
 
 /**
  * REDhelm looks like an app, not a log: agents sit on cards with a colored initial, what needs
@@ -395,9 +395,9 @@ export function Sheet({ els, v, act, columns }: { els: Els; v: View; act: Action
         {!brief && a.description && <Field els={els} name="Working on"><Text wrap="wrap">{a.description}</Text></Field>}
         {a.steps?.length > 0 && (
           <Field els={els} name="Recent steps">
-            {a.steps.slice(0, 6).map((st, i) => (
+            {grouped(a.steps).slice(0, 6).map((st, i) => (
               <Box key={`st-${i}`} justifyContent="space-between" gap={2}>
-                <Text wrap="truncate-end">{st.text}</Text>
+                <Text wrap="truncate-end">{st.text}{st.count > 1 ? <Text color="subtle"> · {st.count} times</Text> : ''}</Text>
                 {st.at !== undefined && <Text color="subtle">{ago(v.now - st.at)}</Text>}
               </Box>
             ))}
@@ -406,12 +406,13 @@ export function Sheet({ els, v, act, columns }: { els: Els; v: View; act: Action
         {!brief && !a.description && !a.steps?.length && !a.thinking && !a.answer && (
           <Text color="subtle" wrap="wrap">This agent started before REDhelm, and Claude Code has no record of its work to show.</Text>
         )}
-        {a.thinking && <Field els={els} name="Thinking"><Text color="subtle" wrap="wrap">{a.thinking}</Text></Field>}
+        {/* Once it has finished, its last words say it; thinking would only repeat them. */}
+        {live && a.thinking && <Field els={els} name="Thinking"><Text color="subtle" wrap="wrap">{a.thinking}</Text></Field>}
         <Field els={els} name="Changed">
           <Text wrap="truncate-end">{a.files.length ? a.files.slice(-4).map(f => f.split('/').pop()).join(', ') + (a.files.length > 4 ? ` and ${a.files.length - 4} more` : '') : 'nothing yet'}</Text>
         </Field>
         {a.model && <Field els={els} name="Model"><Text>{modelWords(a.model, a.effort)}{a.context ? ` · ${kilo(a.context)} tokens of context` : ''}</Text></Field>}
-        {a.answer && <Field els={els} name="Last said"><Text color="subtle" wrap="wrap">{a.answer}</Text></Field>}
+        {(a.answer || (!live && a.thinking)) && <Field els={els} name="Last said"><Text color="subtle" wrap="wrap">{a.answer || a.thinking}</Text></Field>}
       </Box>
 
       <Box justifyContent="space-between" gap={2}>

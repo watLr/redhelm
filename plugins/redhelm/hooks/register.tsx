@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Agent, Guard, Note, Placement, SetupItem } from '../types'
-import { DEFAULTS, LINES, activity, capital, fromConversation, type Said, handleOf, handles, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
+import { DEFAULTS, LINES, activity, capital, fromConversation, tidyPaths, type Said, handleOf, handles, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
 import { laneNames, workspaces, type Io } from './sources'
 import { Alert, Panel, Sheet, type Actions, type Els, type View } from './view'
 
@@ -120,7 +120,7 @@ async function backfill($: $, id: string) {
   readBack.add(id)
   const said = await $.session.messages({ agentId: id })
   if (!Array.isArray(said)) return
-  const got = fromConversation(said as Said[], root)
+  const got = fromConversation(said.map(m => ({ ...m, text: tidy(m.text) })) as Said[], root)
   // What REDhelm saw itself wins; the conversation only fills what is missing.
   await patch($, id, a => ({
     brief: a.brief ?? got.brief,
@@ -130,6 +130,10 @@ async function backfill($: $, id: string) {
     fails: a.fails || got.fails,
   }))
 }
+
+/** The person's home folder, so what agents say never shows it in full. */
+let homeDir = ''
+const tidy = (text = '') => tidyPaths(text, root, homeDir)
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -461,6 +465,7 @@ export const register: Register = (on, options) => {
     hasPython = undefined
     shownStatus = null
     root = await $.session.root()
+    homeDir = await home($).catch(() => '')
     await update($, placement, () => cfg.placement)
     await $.command.register({
       name: 'redhelm',
@@ -561,7 +566,7 @@ export const register: Register = (on, options) => {
       await quietly(async () => {
         await patch($, id, () => ({
           model: r.model, type: e.subagentType, name: e.name ?? '', description: e.description, status: 'running',
-          brief: e.prompt.slice(0, 2000),
+          brief: tidy(e.prompt).slice(0, 2000),
         }))
         await note($, { kind: 'spawn', text: `${e.name || e.description}  ${short(r.model)}`, agentId: id })
         await show($)
@@ -583,7 +588,7 @@ export const register: Register = (on, options) => {
         return { ...all, [m]: { requests: row.requests + 1, output: row.output + (u?.output_tokens ?? 0), agents: row.agents + (e.agentId ? 1 : 0) } }
       })
       if (e.agentId) {
-        const said = excerpt(result.answer, 300)
+        const said = excerpt(tidy(result.answer), 300)
         return patch($, e.agentId, a => ({ model: e.model, effort: effort ?? a.effort, context: context || a.context, thinking: said || a.thinking }))
       }
       chosen ??= e.model
@@ -644,10 +649,10 @@ export const register: Register = (on, options) => {
       const failed = e.reason === 'error' || e.reason === 'refusal'
       // A turn can end while work the agent started still runs (Claude Code lists it as waiting): not finished yet.
       const held = (await $.agent.list()).find(i => i.id === id)
-      if (held && LIVE.has(held.status) && !e.isAborted && !failed) return patch($, id, () => ({ answer: excerpt(e.answer, 160), activity: undefined }))
+      if (held && LIVE.has(held.status) && !e.isAborted && !failed) return patch($, id, () => ({ answer: excerpt(tidy(e.answer), 160), activity: undefined }))
       const at = await $.clock.now()
       await patch($, id, () => ({
-        answer: excerpt(e.answer, 160), endedAt: at,
+        answer: excerpt(tidy(e.answer), 160), endedAt: at,
         status: e.isAborted ? 'killed' : failed ? 'failed' : 'completed', activity: undefined,
       }))
       await announce($, id, failed, e.answer)
@@ -664,7 +669,7 @@ export const register: Register = (on, options) => {
       if (peer) await patch($, from, () => ({ waitingOn: peer.name || excerpt(peer.description, 24) || 'another agent' }))
       if (!peer) {
         const at = await $.clock.now()
-        await update($, inbox, list => [...list, { id: `${from}-${at}`, agentId: from, text: e.text, at }].slice(-20))
+        await update($, inbox, list => [...list, { id: `${from}-${at}`, agentId: from, text: tidy(e.text), at }].slice(-20))
         const name = await nameOf($, from)
         await note($, { kind: 'ask', text: `${name}: ${excerpt(e.text, 60)}`, agentId: from })
         if (cfg.agentToasts) $.ui.toast(`◆ ${name} sent you a message`)

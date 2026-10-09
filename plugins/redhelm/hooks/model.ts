@@ -334,3 +334,20 @@ export const fromConversation = (said: Said[], root: string): Partial<Agent> => 
     thinking: spoke && excerpt(spoke.text, 300),
   }
 }
+
+/** Steps in a row that read the same fold into one line with a count ("Edit review.md · 6 times"). */
+export const grouped = (steps: Agent['steps']) =>
+  steps.reduce<(Agent['steps'][number] & { count: number })[]>((out, s) => {
+    const last = out.at(-1)
+    if (last && last.text === s.text) last.count++
+    else out.push({ ...s, count: 1 })
+    return out
+  }, [])
+
+/** Agents' words name files by full path; inside the project the path is enough, and home reads as ~. */
+export const tidyPaths = (text: string, root: string, home: string) => {
+  let out = text
+  if (root) out = out.split(`${root}/`).join('')
+  if (home) out = out.split(`${home}/`).join('~/')
+  return out
+}
