@@ -5,7 +5,7 @@ import type { Agent } from '../types'
 /** The test runtime has timers; the hooks environment's declarations leave them out. */
 declare const setTimeout: (fn: () => void, ms: number) => unknown
 import {
-  DEFAULTS, activity, handleOf, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
+  DEFAULTS, activity, doing, handleOf, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
 } from '../hooks/model'
 import { workspaces, type Io } from '../hooks/sources'
 import { label, rack, relevant, shortName, summary, type View } from '../hooks/view'
@@ -521,6 +521,16 @@ describe('waiting is not the same as waiting for you', () => {
     expect(await ui.find({ type: 'Text', text: /is waiting for Echo/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Asks you/ })).toBeUndefined()
     await ui.unmount()
+  })
+})
+
+describe('saying what an agent is doing, truthfully', () => {
+  test('an agent with no action for 15 minutes reads as quiet, not as still doing its last thing', async () => {
+    const now = 10 * 3600_000
+    const busy = agent({ recent: ['exploring'], steps: [{ text: 'Read a.ts', at: now - 60_000 }] })
+    const quiet = agent({ recent: ['exploring'], steps: [{ text: 'Read a.ts', at: now - 3 * 3600_000 }] })
+    expect(doing(busy, now)).toBe('is reading the code')
+    expect(doing(quiet, now)).toBe('has been quiet for 3 h 0 min')
   })
 })
 

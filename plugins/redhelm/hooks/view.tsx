@@ -213,7 +213,7 @@ function AgentRow({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Action
           <Avatar els={els} a={a} v={v} />
           <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} hover={{ underline: true, scope: `row-${a.id}` }} onPress={() => act.inspect(a.id)} />
         </Box>
-        <Text color="subtle" wrap="truncate-end">{doing(a)}</Text>
+        <Text color="subtle" wrap="truncate-end">{doing(a, v.now)}</Text>
         {older && <Box flexShrink={0}><Badge els={els} text="Older model" color="warning" /></Box>}
       </Box>
       <Box gap={2} flexShrink={0}>
@@ -238,7 +238,7 @@ function Finished({ els, v, act, strips }: { els: Els; v: View; act: Actions; st
         <Box key={`d-${s.agent.id}`} gap={1}>
           <Avatar els={els} a={s.agent} v={v} />
           <Button key={`sel-${s.agent.id}`} plain dimColor label={label(s.agent, v.lanes)} onPress={() => act.inspect(s.agent.id)} />
-          <Text color="subtle" wrap="truncate-end">{doing(s.agent)}{s.agent.answer ? `: ${excerpt(s.agent.answer, 80)}` : ''}</Text>
+          <Text color="subtle" wrap="truncate-end">{doing(s.agent, v.now)}{s.agent.answer ? `: ${excerpt(s.agent.answer, 80)}` : ''}</Text>
         </Box>
       ))}
     </Box>
@@ -375,7 +375,7 @@ export function Sheet({ els, v, act, columns }: { els: Els; v: View; act: Action
           <Text bold>{label(a, v.lanes)}</Text>
           {ask && <Badge els={els} text="Asks you" color="warning" />}
         </Box>
-        <Text color="subtle">{doing(a)} · {minutes((a.endedAt ?? v.now) - a.startedAt)}</Text>
+        <Text color="subtle">{doing(a, v.now)} · {minutes((a.endedAt ?? v.now) - a.startedAt)}</Text>
       </Box>
 
       {ask && (

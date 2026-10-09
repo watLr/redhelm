@@ -97,14 +97,21 @@ const PHRASE: Record<Phase, string> = {
 }
 
 /** "is writing code", "is waiting for Echo", "finished", ... */
-export const doing = (a: Agent) =>
-  a.waitingOn && (a.status === 'running' || a.status === 'waiting') ? `is waiting for ${capital(a.waitingOn)}`
+const QUIET_MS = 15 * 60_000
+
+export const doing = (a: Agent, now?: number) => {
+  const last = a.steps?.[0]?.at
+  const live = a.status === 'running' || a.status === 'waiting' || a.status === 'pending'
+  // An old last action is not what it is doing now: say it has been quiet, and for how long.
+  if (now && last && live && !a.waitingOn && now - last > QUIET_MS) return `has been quiet for ${minutes(now - last)}`
+  return a.waitingOn && (a.status === 'running' || a.status === 'waiting') ? `is waiting for ${capital(a.waitingOn)}`
   : a.status === 'waiting' ? 'is waiting'
   : a.status === 'completed' ? 'finished'
   : a.status === 'failed' ? 'failed'
   : a.status === 'killed' ? 'was stopped'
   : a.status === 'idle' ? 'is idle'
   : (phase(a.recent) && PHRASE[phase(a.recent)!]) || 'is getting started'
+}
 
 const EFFORT: Record<string, string> = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra-high', max: 'maximum' }
 
