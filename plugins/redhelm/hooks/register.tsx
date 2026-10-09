@@ -100,16 +100,6 @@ async function io($: $): Promise<Io> {
   }
 }
 
-/** TEMP (debugging Message): appends one line to ~/.claude/redhelm/trace.log. Remove after the fix. */
-async function trace($: $, line: string) {
-  try {
-    const dir = `${(await $.env.get('HOME')) ?? ''}/.claude/redhelm`
-    const path = `${dir}/trace.log`
-    const prev = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
-    await $.fs.write(path, `${prev}${new Date(await $.clock.now()).toISOString()} ${line}\n`)
-  } catch {}
-}
-
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 /** Merges the engine's agent list; writes only on change, and ticks the clock only while agents are live. */
@@ -325,11 +315,10 @@ function actions($: $): Actions {
   const open = () => void $.ui.open({ id: PANE, title: TITLE, focus: true }).catch(() => {})
   return {
     open,
-    select: id => void trace($, `select ${id}`).then(() => update($, selected, () => id)).then(() => update($, composing, () => null)),
+    select: id => void update($, selected, () => id).then(() => update($, composing, () => null)),
     compose: id =>
       void (async () => {
         if (!id) return update($, composing, () => null)
-        await trace($, `compose ${id}`)
         const draft = (await $.prompt.read()).text.replace(ADDRESS, '$2')
         const { isFilled } = await $.prompt.fill({ text: `→ ${handleOf((await $.state.get(AGENTS)).value?.[id])}: ${draft}`, mode: 'replace' })
         if (isFilled) await update($, composing, () => id)
@@ -339,9 +328,7 @@ function actions($: $): Actions {
     stop: id =>
       void (async () => {
         const name = await nameOf($, id)
-        await trace($, `stop ${id}`)
-        const r = await $.tool.call({ tool: 'TaskStop', task_id: id })
-        await trace($, `stop result ${JSON.stringify(r).slice(0, 200)}`)
+        await $.tool.call({ tool: 'TaskStop', task_id: id })
         await note($, { kind: 'fail', text: `${name} stopped by you`, agentId: id })
       })(),
     applySetup: () => void quietly(() => applySetup($)),
@@ -453,9 +440,7 @@ export const register: Register = (on, options) => {
       const name = address[1]!.trim()
       const text = address[2]!.trim()
       if (!text) return { drop: `REDhelm: nothing to send to ${name}` }
-      await trace($, `send ${to} (${text.length} chars, from prompt)`)
       const { isDelivered, reason } = await $.session.send({ to: { agentId: to }, text })
-      await trace($, `send result delivered=${isDelivered} reason=${reason ?? '-'}`)
       await update($, composing, () => null)
       if (!isDelivered) return { drop: `REDhelm: not delivered to ${name} (${reason ?? 'unknown reason'})` }
       await update($, inbox, list => list.filter(m => m.agentId !== to))

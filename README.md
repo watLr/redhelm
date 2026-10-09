@@ -13,15 +13,17 @@ REDhelm  3 live · 2 done                Demo app 4 open · release-run active
 ▌ api      ◆ Ready to merge?                         Opus 5.5 · high    9m · 201k
 ```
 
-> **Status: early release (0.3).** The rack, model guard, settings and workflows are
-> covered by tests and daily use; **Message**, **Stop** and agent-to-you messages are
-> new and not yet field-tested with long multi-agent runs. Issues welcome.
+> **Status: early release (0.3).** Covered by tests and checked with real agents:
+> the rack, **Message** and **Stop**, the model guard, settings and workflows.
+> Agent-to-you messages are newer. Issues welcome.
 
 ## What it does
 
 - **Agents rack** — one strip per agent: model and effort, what it is doing right now
   (exploring, building, checking), run time and context size. Expand a strip for its
-  task, last answer and changed files, with **Message** and **Stop**.
+  task, last answer and changed files, with **Message** and **Stop**. Message fills
+  your prompt with `→ name: `; type and press Enter to send it to that agent instead
+  of Claude (you can also type `→ name: message` yourself).
 - **Needs you** — an agent waiting on you, or one that sent you a message, is pulled
   out of the rack with its message and a **Reply** button.
 - **Where work lands** — changed files grouped by folder, and a warning when two live
