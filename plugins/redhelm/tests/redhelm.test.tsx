@@ -142,6 +142,7 @@ const engine = (on: any, isInteractive: boolean) => async ($: any) => {
   mock.store(on)
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
   on('classic.PostModelSwitch', () => ({}))
   on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { // Claude Code's own (empty) band
     const { Box } = $.ui.resolve(e)
@@ -150,7 +151,8 @@ const engine = (on: any, isInteractive: boolean) => async ($: any) => {
   on('session.start', () => ({ cwd: '/p' }))
   on('session.root', () => ({ value: '/p' }))
   on('command.register', () => ({ value: { command: 'redhelm' } }))
-  on('agent.spawn', () => ({ model: 'claude-opus-5-5[1m]', agentId: 'a1' }))
+  let spawned = 0 // each spawn gets the next id: a1, a2, ...
+  on('agent.spawn', () => ({ model: 'claude-opus-5-5[1m]', agentId: `a${++spawned}` }))
   on('tool.call', () => ({ result: 'ok' }))
   await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive })
 }
@@ -215,7 +217,7 @@ describe('the pane', () => {
 describe('the rack', () => {
   test('orders strips by who needs you next and pulls out the ones that do', async () => {
     const v = {
-      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, root: '/p', lanes: {},
+      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, root: '/p', handles: {}, lanes: {},
       agents: [
         agent({ id: 'run', startedAt: 1 }),
         agent({ id: 'done', status: 'completed', endedAt: 5 }),
@@ -396,14 +398,14 @@ describe('messaging an agent', () => {
     expect(await ui.find({ type: 'Text', text: /Ready to merge\?/ })).toBeDefined()
     await ui.press({ key: 'compose-a1' })
     await new Promise<void>(r => setTimeout(() => r(), 40))
-    expect(await ui.find({ type: 'Text', text: /Your prompt now starts with “→ docs:”/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /type below · Enter sends to docs/ })).toBeDefined()
     expect(await ui.find({ key: 'compose-a1' })).toBeUndefined()
     await ui.unmount()
   })
 })
 
 describe('what REDhelm chooses to show', () => {
-  const base = { now: 0, notes: [], inbox: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, lanes: {} }
+  const base = { now: 0, notes: [], inbox: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, handles: {}, lanes: {} }
 
   test("only this session's workflows, or ones an agent here is changing; finished runs stay quiet", async () => {
     const ws = (dir: string, extra: object) => ({ dir, name: dir.split('/').pop()!, ...extra })
@@ -462,6 +464,43 @@ describe('your draft is never sent to an agent', () => {
     expect(await ui.find({ type: 'Text', text: /Working on: Choose colors for the settings page/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Was just: Edit Button\.tsx/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /just now/ })).toBeDefined()
+    await ui.unmount()
+  })
+})
+
+describe('two agents with the same name', () => {
+  test('get distinct addresses, and Reply goes to the agent whose card you pressed', async ($: any, on: any) => {
+    let box = ''
+    const sent: any[] = []
+    on('prompt.read', () => ({ value: { text: box, cursor: box.length } }))
+    on('prompt.fill', (_: any, e: any) => ((box = e.text), { isFilled: true }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    on('session.send', (_: any, e: any) => (sent.push(e), { isDelivered: true }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'asker', subagentType: 'general-purpose', name: 'asker' })
+    await $.agent.spawn({ prompt: 'x', description: 'asker', subagentType: 'general-purpose', name: 'asker' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'sel-a2' })
+    await ui.press({ key: 'compose-a2' })
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    expect(box).toBe('→ asker a2: ')
+    await $.prompt.submit({ text: `${box}yes` })
+    expect(sent.map(e => [e.to, e.text])).toEqual([['a2', 'yes']])
+    await ui.unmount()
+  })
+})
+
+describe('waiting is not the same as waiting for you', () => {
+  test('an agent that messaged another agent reads "is waiting for <that agent>", with no card for you', async ($: any, on: any) => {
+    on('session.send', () => ({ isDelivered: true }))
+    on('agent.list', () => ({ value: [{ id: 'a1', name: 'echo', description: 'echo', type: 'general-purpose', status: 'running' }] }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'echo', subagentType: 'general-purpose', name: 'echo' })
+    await $.agent.spawn({ prompt: 'x', description: 'asker', subagentType: 'general-purpose', name: 'asker' })
+    await $.session.send({ to: 'echo', text: 'are you done?', agentId: 'a2' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /is waiting for Echo/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /needs your answer/ })).toBeUndefined()
     await ui.unmount()
   })
 })

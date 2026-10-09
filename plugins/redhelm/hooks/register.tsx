@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Agent, Guard, Note, Placement, SetupItem } from '../types'
-import { DEFAULTS, LINES, activity, handleOf, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
+import { DEFAULTS, LINES, activity, capital, handleOf, handles, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
 import { laneNames, workspaces, type Io } from './sources'
 import { Alert, Panel, type Actions, type Els, type View } from './view'
 
@@ -26,7 +26,8 @@ const inbox = atom({ plugin: 'redhelm', key: 'inbox' } as const, [])
 const spaces = atom(WORKSPACES, [])
 const guard = atom(GUARD, {})
 const selected = atom({ plugin: 'redhelm', key: 'selected' } as const, null)
-const composing = atom({ plugin: 'redhelm', key: 'composing' } as const, null)
+const COMPOSING = { plugin: 'redhelm', key: 'composing' } as const
+const composing = atom(COMPOSING, null)
 const now = atom({ plugin: 'redhelm', key: 'now' } as const, 0)
 const placement = atom(PLACEMENT, 'right' as Placement)
 const collapsed = atom({ plugin: 'redhelm', key: 'collapsed' } as const, false)
@@ -73,7 +74,11 @@ const ADDRESS = /^→ ([^:\n]+): ([\s\S]*)$/
 /** The agent an address names, preferring one still running. */
 async function agentNamed($: $, name: string) {
   const all = Object.values((await $.state.get(AGENTS)).value ?? {})
-  const named = all.filter(a => handleOf(a).toLowerCase() === name.trim().toLowerCase())
+  const hs = handles(all)
+  const wanted = name.trim().toLowerCase()
+  const replying = (await $.state.get(COMPOSING)).value
+  if (replying && hs[replying]?.toLowerCase() === wanted) return replying
+  const named = all.filter(a => hs[a.id]!.toLowerCase() === wanted)
   return (named.find(a => LIVE.has(a.status)) ?? named[0])?.id
 }
 
@@ -315,7 +320,8 @@ function actions($: $): Actions {
         const text = (await $.prompt.read()).text
         const already = text.match(ADDRESS)
         if (!already && text.trim()) setAside = text
-        const { isFilled } = await $.prompt.fill({ text: `→ ${handleOf((await $.state.get(AGENTS)).value?.[id])}: ${already ? already[2] : ''}`, mode: 'replace' })
+        const handle = handles(Object.values((await $.state.get(AGENTS)).value ?? {}))[id] ?? 'agent'
+        const { isFilled } = await $.prompt.fill({ text: `→ ${handle}: ${already ? already[2] : ''}`, mode: 'replace' })
         if (isFilled) {
           await update($, composing, () => id)
           await update($, aside, () => setAside !== undefined)
@@ -341,9 +347,14 @@ const elements = (table: unknown, surface: string): Els =>
 
 async function view($: $): Promise<View> {
   const list = await read($, spaces)
+  const all = Object.values(await read($, agents)).sort((a, b) => a.startedAt - b.startedAt)
+  const hs = handles(all)
+  // Agents sharing a name are told apart on screen exactly as in their address.
+  const tagged = Object.fromEntries(all.filter(a => hs[a.id] !== handleOf(a)).map(a => [a.id, capital(hs[a.id]!)]))
   return {
     now: await read($, now),
-    agents: Object.values(await read($, agents)).sort((a, b) => a.startedAt - b.startedAt),
+    agents: all,
+    handles: hs,
     notes: await read($, notes),
     inbox: await read($, inbox),
     workspaces: list,
@@ -354,7 +365,7 @@ async function view($: $): Promise<View> {
     showDone: await read($, showDone),
     aside: await read($, aside),
     root,
-    lanes: laneNames(list),
+    lanes: { ...tagged, ...laneNames(list) },
   }
 }
 
@@ -523,6 +534,7 @@ export const register: Register = (on, options) => {
       const file = changedFile(e.tool, input)
       const path = file && relative(file, root)
       return patch($, id, a => ({
+        waitingOn: undefined,
         activity: activity(e.tool, input),
         recent: [...a.recent, kindOf(e.tool)].slice(-8),
         ...(path && { files: [...a.files.filter(f => f !== path), path].slice(-30), edits: a.edits + 1 }),
@@ -565,8 +577,9 @@ export const register: Register = (on, options) => {
     const from = e.agentId
     if (active && from && r.isDelivered) await quietly(async () => {
       const peers = await $.agent.list()
-      const toPeer = peers.some(p => p.id === e.to || p.name === e.to || p.teammateId === e.to)
-      if (!toPeer) {
+      const peer = peers.find(p => p.id === e.to || p.name === e.to || p.teammateId === e.to)
+      if (peer) await patch($, from, () => ({ waitingOn: peer.name || excerpt(peer.description, 24) || 'another agent' }))
+      if (!peer) {
         const at = await $.clock.now()
         await update($, inbox, list => [...list, { id: `${from}-${at}`, agentId: from, text: e.text, at }].slice(-20))
         const name = await nameOf($, from)
@@ -610,6 +623,9 @@ export const register: Register = (on, options) => {
   /** Above the prompt: the whole rack in bottom placement, otherwise only a pulled-out strip. */
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!active || e.props.hasSurvey) return next(e)
+    // One REDhelm on screen: while the pane is open, the band steps aside.
+    const paneShown = await $.ui.panes().then(ps => ps.some(p => p.id === PANE && p.isShown), () => false)
+    if (paneShown) return next(e)
     const els = elements($.ui.resolve(e), e.surface)
     const v = await view($)
     const act = actions($)

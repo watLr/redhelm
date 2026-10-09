@@ -96,9 +96,10 @@ const PHRASE: Record<Phase, string> = {
   delegating: 'is handing off work',
 }
 
-/** "is writing code", "is waiting for you", "finished", ... */
+/** "is writing code", "is waiting for Echo", "finished", ... */
 export const doing = (a: Agent) =>
-  a.status === 'waiting' ? 'is waiting for you'
+  a.waitingOn && (a.status === 'running' || a.status === 'waiting') ? `is waiting for ${capital(a.waitingOn)}`
+  : a.status === 'waiting' ? 'is waiting'
   : a.status === 'completed' ? 'finished'
   : a.status === 'failed' ? 'failed'
   : a.status === 'killed' ? 'was stopped'
@@ -132,6 +133,16 @@ export const handleOf = (a?: Agent) => {
     out = `${out} ${w}`
   }
   return out
+}
+
+/** Every agent's address, kept unique: a second "asker" becomes "asker aee7". */
+export const handles = (agents: Agent[]) => {
+  const count = new Map<string, number>()
+  for (const a of agents) count.set(handleOf(a).toLowerCase(), (count.get(handleOf(a).toLowerCase()) ?? 0) + 1)
+  return Object.fromEntries(agents.map(a => {
+    const h = handleOf(a)
+    return [a.id, count.get(h.toLowerCase())! > 1 ? `${h} ${a.id.slice(0, 4)}` : h]
+  })) as Record<string, string>
 }
 
 // Numbers and time

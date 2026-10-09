@@ -8,6 +8,8 @@ export type Agent = {
   status: AgentStatus
   model?: string
   effort?: string
+  /** The agent it messaged and is waiting on, until it gets back to work. */
+  waitingOn?: string
   /** What it is doing right now: the last tool call, short. */
   activity?: string
   /** The kinds of its last few tool calls, newest last; its phase is read from them. */

@@ -35,6 +35,8 @@ export type View = {
   composing: string | null
   setup: SetupItem[]
   showDone: boolean
+  /** Each agent's message address (unique). */
+  handles: Record<string, string>
   /** Whether a draft for Claude was set aside while you message an agent. */
   aside: boolean
   /** The session's project root, to tell this session's workflows from merely nearby ones. */
@@ -56,7 +58,7 @@ export const label = (a: Agent, lanes: Record<string, string>) =>
 export function rack(v: View): Strip[] {
   const strips = v.agents.map(agent => {
     const messages = v.inbox.filter(m => m.agentId === agent.id)
-    return { agent, messages, cocked: agent.status === 'waiting' || messages.length > 0 }
+    return { agent, messages, cocked: messages.length > 0 }
   })
   const rank = (s: Strip) => (s.cocked ? 0 : LIVE.has(s.agent.status) ? 1 : 2)
   return strips.sort((a, b) =>
@@ -103,12 +105,10 @@ function ModelNotice({ els, g }: { els: Els; g: Guard }) {
 }
 
 /** After Reply or Message: say where to type, so nobody presses the button again. */
-function TypeHint({ els, a, aside }: { els: Els; a: Agent; aside: boolean }) {
+function TypeHint({ els, handle, aside }: { els: Els; handle: string; aside: boolean }) {
   const { Text } = els
   return (
-    <Text color={C.attention} wrap="wrap">
-      Your prompt now starts with “→ {handleOf(a)}:”. Type below and press Enter.{aside ? ' What you were typing comes back after you send.' : ''}
-    </Text>
+    <Text color={C.attention} wrap="truncate-end">↓ type below · Enter sends to {handle}{aside ? ' · your draft is saved' : ''}</Text>
   )
 }
 
@@ -118,7 +118,7 @@ const ago = (ms: number) => (ms < 60_000 ? 'just now' : `${minutes(ms)} ago`)
 function AgentActions({ els, s, v, act, primary }: { els: Els; s: Strip; v: View; act: Actions; primary: string }) {
   const { Box, Button } = els
   const a = s.agent
-  if (v.composing === a.id) return <TypeHint els={els} a={a} aside={v.aside} />
+  if (v.composing === a.id) return <TypeHint els={els} handle={v.handles[a.id] ?? handleOf(a)} aside={v.aside} />
   return (
     <Box gap={3}>
       <Button key={`compose-${a.id}`} label={primary} variant="primary" onPress={() => act.compose(a.id)} />
@@ -137,7 +137,7 @@ function NeedsCard({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actio
   return (
     <Box flexDirection="column" paddingLeft={2}>
       <Box justifyContent="space-between" gap={2}>
-        <Text bold color={C.attention}>{name} {ask ? 'needs your answer' : 'is waiting for you'}</Text>
+        <Text bold color={C.attention}>{name} needs your answer</Text>
         {ask && <Text dimColor>{ago(v.now - ask.at)}</Text>}
       </Box>
       {task && <Text dimColor wrap="wrap">Working on: {task}</Text>}
@@ -355,7 +355,7 @@ function NeedsLine({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actio
   return (
     <Box justifyContent="space-between" gap={2}>
       <Text wrap="truncate-end">
-        <Text bold color={C.attention}>{label(s.agent, v.lanes)} {ask ? 'needs your answer' : 'is waiting for you'}</Text>
+        <Text bold color={C.attention}>{label(s.agent, v.lanes)} needs your answer</Text>
         {ask ? <Text>: “{excerpt(ask.text, 160)}”</Text> : null}
       </Text>
       <AgentActions els={els} s={s} v={v} act={act} primary={ask ? 'Reply' : 'Message'} />
@@ -410,7 +410,7 @@ export function Alert({ els, v, act }: { els: Els; v: View; act: Actions }) {
     : first
       ? (
         <Text wrap="truncate-end">
-          <Text bold color={C.attention}>{label(first.agent, v.lanes)} {ask ? 'needs your answer' : 'is waiting for you'}</Text>
+          <Text bold color={C.attention}>{label(first.agent, v.lanes)} needs your answer</Text>
           {ask ? <Text>: “{excerpt(ask.text, 90)}”</Text> : null}
         </Text>
       )
