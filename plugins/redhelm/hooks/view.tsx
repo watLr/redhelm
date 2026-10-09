@@ -54,7 +54,7 @@ const PALETTE = {
 
 const AVATARS = ['#4f8ff7', '#a777f2', '#22b8a6', '#f0883e', '#e8659a', '#8cc152']
 
-const tone = (v: View) => PALETTE[v.theme]
+const tone = (v: View) => PALETTE[v.theme] ?? PALETTE.dark
 
 /** The same color for an agent everywhere it appears. */
 const avatarColor = (id: string) => AVATARS[[...id].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATARS.length]!
@@ -185,12 +185,12 @@ function NeedsCard({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actio
   return (
     <Card els={els} v={v}>
       <Box justifyContent="space-between" gap={2}>
-        <Box gap={1}>
+        <Box gap={1} flexShrink={0}>
           <Avatar els={els} a={a} v={v} />
           <Button key={`sel-${a.id}`} plain label={name} hover={{ underline: true, scope: `sel-${a.id}` }} onPress={() => act.inspect(a.id)} />
           <Badge els={els} text="Asks you" color="warning" />
         </Box>
-        <Text color="subtle">{ago(v.now - ask.at)}</Text>
+        <Text color="subtle" wrap="truncate-end">{ago(v.now - ask.at)}</Text>
       </Box>
       {task && <Text color="subtle" wrap="truncate-end">{task}</Text>}
       <Box marginY={1}>
@@ -209,10 +209,12 @@ function AgentRow({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Action
   return (
     <Box justifyContent="space-between" gap={2}>
       <Box gap={1} flexShrink={1}>
-        <Avatar els={els} a={a} v={v} />
-        <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} hover={{ underline: true, scope: `row-${a.id}` }} onPress={() => act.inspect(a.id)} />
+        <Box gap={1} flexShrink={0}>
+          <Avatar els={els} a={a} v={v} />
+          <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} hover={{ underline: true, scope: `row-${a.id}` }} onPress={() => act.inspect(a.id)} />
+        </Box>
         <Text color="subtle" wrap="truncate-end">{doing(a)}</Text>
-        {older && <Badge els={els} text="Older model" color="warning" />}
+        {older && <Box flexShrink={0}><Badge els={els} text="Older model" color="warning" /></Box>}
       </Box>
       <Box gap={2} flexShrink={0}>
         <Text color="subtle">{minutes(v.now - a.startedAt)}</Text>
@@ -453,9 +455,11 @@ function NeedsLine({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actio
   return (
     <Box justifyContent="space-between" gap={2}>
       <Box gap={1} flexShrink={1}>
-        <Avatar els={els} a={a} v={v} />
-        <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} hover={{ underline: true, scope: `sel-${a.id}` }} onPress={() => act.inspect(a.id)} />
-        <Badge els={els} text="Asks you" color="warning" />
+        <Box gap={1} flexShrink={0}>
+          <Avatar els={els} a={a} v={v} />
+          <Button key={`sel-${a.id}`} plain label={label(a, v.lanes)} hover={{ underline: true, scope: `sel-${a.id}` }} onPress={() => act.inspect(a.id)} />
+          <Badge els={els} text="Asks you" color="warning" />
+        </Box>
         <Text wrap="truncate-end">{excerpt(ask.text, 160)}</Text>
       </Box>
       <Box flexShrink={0}>
@@ -512,9 +516,11 @@ export function Alert({ els, v, act }: { els: Els; v: View; act: Actions }) {
     : first && ask
       ? (
         <Box gap={1} flexShrink={1}>
-          <Avatar els={els} a={first.agent} v={v} />
-          <Text bold>{label(first.agent, v.lanes)}</Text>
-          <Badge els={els} text="Asks you" color="warning" />
+          <Box gap={1} flexShrink={0}>
+            <Avatar els={els} a={first.agent} v={v} />
+            <Text bold wrap="truncate-end">{label(first.agent, v.lanes)}</Text>
+            <Badge els={els} text="Asks you" color="warning" />
+          </Box>
           <Text wrap="truncate-end">{excerpt(ask.text, 90)}</Text>
         </Box>
       )
