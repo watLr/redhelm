@@ -87,6 +87,53 @@ export const LINES = [
   { key: 'subagentStatusLine', script: 'agents.py', label: "Show each agent's model and effort in Claude Code's agent panel" },
 ] as const
 
+// Plain words: REDhelm speaks in sentences, not codes
+
+const PHRASE: Record<Phase, string> = {
+  exploring: 'is reading the code',
+  building: 'is writing code',
+  checking: 'is running checks',
+  delegating: 'is handing off work',
+}
+
+/** "is writing code", "is waiting for you", "finished", ... */
+export const doing = (a: Agent) =>
+  a.status === 'waiting' ? 'is waiting for you'
+  : a.status === 'completed' ? 'finished'
+  : a.status === 'failed' ? 'failed'
+  : a.status === 'killed' ? 'was stopped'
+  : a.status === 'idle' ? 'is idle'
+  : (phase(a.recent) && PHRASE[phase(a.recent)!]) || 'is getting started'
+
+const EFFORT: Record<string, string> = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra-high', max: 'maximum' }
+
+/** "Opus 5.5 · extra-high effort" */
+export const modelWords = (model?: string, effort?: string) =>
+  [short(model), effort && `${EFFORT[effort] ?? effort} effort`].filter(Boolean).join(' · ')
+
+/** "9 min", "2 h 5 min", "just now" */
+export const minutes = (ms: number) => {
+  const m = Math.floor(Math.max(0, ms) / 60000)
+  if (m < 1) return 'just now'
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`
+}
+
+export const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/**
+ * The name an address uses: the agent's own name, else the first words of its task, with no
+ * colon or ellipsis in it, so "→ handle: message" always reads back to the same agent.
+ */
+export const handleOf = (a?: Agent) => {
+  const words = (a?.name || a?.description || a?.type || 'agent').replace(/[:\n…]+/g, ' ').trim().split(/\s+/)
+  let out = words[0]!.slice(0, 24)
+  for (const w of words.slice(1)) {
+    if (`${out} ${w}`.length > 24) break
+    out = `${out} ${w}`
+  }
+  return out
+}
+
 // Numbers and time
 
 export const kilo = (n: number) =>
@@ -153,21 +200,6 @@ export const changedFile = (tool: string, input: Record<string, unknown>) =>
 
 export const relative = (path: string, root: string) =>
   path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path
-
-/** Changed files grouped by top-level folder: where the work is landing, and who is on it. */
-export const areas = (agents: Agent[]) => {
-  const map = new Map<string, { area: string; files: Set<string>; agents: Set<string> }>()
-  for (const a of agents) {
-    for (const f of a.files) {
-      const area = f.includes('/') ? f.slice(0, f.indexOf('/')) : '.'
-      const row = map.get(area) ?? { area, files: new Set(), agents: new Set() }
-      row.files.add(f)
-      row.agents.add(a.id)
-      map.set(area, row)
-    }
-  }
-  return [...map.values()].sort((a, b) => b.files.size - a.files.size)
-}
 
 /** Files two or more live agents are changing at once. */
 export const overlaps = (agents: Agent[]) => {

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Agent, Guard, Note, Placement, SetupItem } from '../types'
-import { DEFAULTS, LINES, activity, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
+import { DEFAULTS, LINES, activity, handleOf, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
 import { laneNames, workspaces, type Io } from './sources'
 import { Alert, Panel, type Actions, type Els, type View } from './view'
 
@@ -19,6 +19,7 @@ const SETUP = { plugin: 'redhelm', key: 'setup' } as const
 const USAGE = { plugin: 'redhelm', key: 'usage' } as const
 
 const agents = atom(AGENTS, {})
+const showDone = atom({ plugin: 'redhelm', key: 'showDone' } as const, false)
 const notes = atom({ plugin: 'redhelm', key: 'notes' } as const, [])
 const inbox = atom({ plugin: 'redhelm', key: 'inbox' } as const, [])
 const spaces = atom(WORKSPACES, [])
@@ -64,20 +65,6 @@ async function note($: $, n: Omit<Note, 'at'>) {
 const labelOf = (a?: Agent) => a?.name || excerpt(a?.description, 24) || a?.type || 'agent'
 
 const nameOf = async ($: $, id: string) => labelOf((await $.state.get(AGENTS)).value?.[id])
-
-/**
- * The name an address uses: the agent's own name, else the first words of its task, with no
- * colon or ellipsis in it, so "→ handle: message" always reads back to the same agent.
- */
-const handleOf = (a?: Agent) => {
-  const words = (a?.name || a?.description || a?.type || 'agent').replace(/[:\n…]+/g, ' ').trim().split(/\s+/)
-  let out = words[0]!.slice(0, 24)
-  for (const w of words.slice(1)) {
-    if (`${out} ${w}`.length > 24) break
-    out = `${out} ${w}`
-  }
-  return out
-}
 
 /** A prompt addressed to an agent: "→ handle: message". */
 const ADDRESS = /^→ ([^:\n]+): ([\s\S]*)$/
@@ -331,6 +318,7 @@ function actions($: $): Actions {
         await $.tool.call({ tool: 'TaskStop', task_id: id })
         await note($, { kind: 'fail', text: `${name} stopped by you`, agentId: id })
       })(),
+    toggleDone: () => void update($, showDone, x => !x),
     applySetup: () => void quietly(() => applySetup($)),
     skipSetup: () => void quietly(() => skipSetup($)),
   }
@@ -352,6 +340,7 @@ async function view($: $): Promise<View> {
     selected: await read($, selected),
     composing: await read($, composing),
     setup: await read($, setup),
+    showDone: await read($, showDone),
     lanes: laneNames(list),
   }
 }

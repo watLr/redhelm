@@ -5,7 +5,7 @@ import type { Agent } from '../types'
 /** The test runtime has timers; the hooks environment's declarations leave them out. */
 declare const setTimeout: (fn: () => void, ms: number) => unknown
 import {
-  DEFAULTS, activity, settings, areas, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
+  DEFAULTS, activity, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
 } from '../hooks/model'
 import { workspaces, type Io } from '../hooks/sources'
 import { rack, shortName, summary, type View } from '../hooks/view'
@@ -67,13 +67,12 @@ describe('what agents do', () => {
     expect(kindOf('Grep')).toBe('exploring')
   })
 
-  test('areas group changed files and overlaps flag shared files', async () => {
+  test('overlaps flag a file two live agents are both changing', async () => {
     const list = [
       agent({ id: 'a', files: ['src/guide/setup.md', 'src/app/index.ts'] }),
       agent({ id: 'b', name: 'camera', files: ['src/guide/setup.md', 'tools/cam.mjs'] }),
       agent({ id: 'c', status: 'completed', files: ['src/guide/setup.md'] }),
     ]
-    expect(areas(list).map(a => [a.area, a.files.size])).toEqual([['src', 2], ['tools', 1]])
     expect(overlaps(list)).toEqual([{ file: 'src/guide/setup.md', ids: ['a', 'b'] }])
   })
 })
@@ -162,11 +161,12 @@ describe('the pane', () => {
 
     for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
       const ui = await $.ui.mount({ ...PANE, surface } as any)
-      expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('docs')
-      expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /Edit setup\.md/ })).toBeDefined()
+      expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('Docs')
+      expect(await ui.find({ type: 'Text', text: /is writing code/ })).toBeDefined()
       await ui.press({ key: 'sel-a1' })
-      expect(await ui.find({ type: 'Text', text: /Rewrite the setup guide/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Task: Rewrite the setup guide/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Model: Opus 5\.5/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Right now: Edit setup\.md/ })).toBeDefined()
       expect(await ui.find({ key: 'compose-a1' })).toBeDefined() // messaging goes through the prompt, so every surface has it
       await ui.press({ key: 'sel-a1' })
       await ui.unmount()
@@ -178,7 +178,7 @@ describe('the pane', () => {
     await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
     expect(await ui.find({ key: 'sel-a1' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /No agents yet/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Agents you start show up here/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -186,8 +186,8 @@ describe('the pane', () => {
     await engine(on, true)($)
     await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline', bodyColumns: 140 } } as any)
-    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('docs')
-    expect(await ui.find({ type: 'Text', text: /starting/ })).toBeDefined()
+    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('Docs')
+    expect(await ui.find({ type: 'Text', text: /is getting started/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -200,7 +200,7 @@ describe('the pane', () => {
 
     expect((await run('bottom')).text).toBe('REDhelm now lives at the bottom')
     let ui = await $.ui.mount(band)
-    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('docs')
+    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('Docs')
     await ui.unmount()
 
     expect((await run('')).text).toBe('REDhelm folded')
@@ -213,7 +213,7 @@ describe('the pane', () => {
 describe('the rack', () => {
   test('orders strips by who needs you next and pulls out the ones that do', async () => {
     const v = {
-      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], lanes: {},
+      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, lanes: {},
       agents: [
         agent({ id: 'run', startedAt: 1 }),
         agent({ id: 'done', status: 'completed', endedAt: 5 }),
@@ -243,13 +243,13 @@ describe('what REDhelm brings to Claude Code', () => {
     await engine(on, true)($)
     await settle()
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
-    expect(await ui.find({ type: 'Text', text: /Set up REDhelm/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Finish setting up REDhelm/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Timestamp every message/ })).toBeUndefined() // already on
     expect(await ui.find({ type: 'Text', text: /phone/ })).toBeUndefined() // locked by policy
     await ui.press({ key: 'setup-apply' })
     await settle()
     expect(written).toEqual({ switchModelsOnFlag: 'Ask each time', turnDuration: true })
-    expect(await ui.find({ type: 'Text', text: /Set up REDhelm/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Finish setting up REDhelm/ })).toBeUndefined()
     await ui.unmount()
   })
 
@@ -326,12 +326,12 @@ describe('the bottom bar', () => {
   })
 
   test('each workspace reads as a few words', async () => {
-    expect(summary({ dir: '/p/game', name: 'Game', lanes: [{ id: 'api', title: 'API', done: 1, total: 2 }] })).toBe('Game 1/2')
+    expect(summary({ dir: '/p/game', name: 'Game', lanes: [{ id: 'api', title: 'API', done: 1, total: 2 }] })).toBe('Game 1 of 2 done')
     expect(summary({
       dir: '/p/app', name: 'Demo app (web) — beta',
       board: { stages: ['Done'], rows: [{ id: 'P1', stages: {}, note: '', at: 0 }], total: 4 },
       runs: [{ name: 'demo-run', status: 'ACTIVE', open: 2 }],
-    })).toBe('Demo app 1 open · demo-run active')
+    })).toBe('Demo app 1 task open · demo-run active')
   })
 })
 
@@ -379,6 +379,24 @@ describe('messaging an agent', () => {
     const r = await $.prompt.submit({ text: `${filled}Hi` })
     expect(sent.map(e => [e.to, e.text])).toEqual([['a1', 'Hi']])
     expect(r.drop).toMatch(/sent/)
+  })
+
+  test('an agent that asks you gets a card, and Reply says where to type instead of staying a button', async ($: any, on: any) => {
+    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+    on('prompt.fill', () => ({ isFilled: true }))
+    on('session.send', () => ({ isDelivered: true }))
+    on('agent.list', () => ({ value: [] }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
+    await $.session.send({ to: 'lead', text: 'Ready to merge?', agentId: 'a1' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /Docs needs your answer/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Ready to merge\?/ })).toBeDefined()
+    await ui.press({ key: 'compose-a1' })
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    expect(await ui.find({ type: 'Text', text: /Your prompt now starts with “→ docs:”/ })).toBeDefined()
+    expect(await ui.find({ key: 'compose-a1' })).toBeUndefined()
+    await ui.unmount()
   })
 })
 

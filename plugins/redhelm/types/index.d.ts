@@ -88,6 +88,8 @@ declare module 'claude-code' {
       /** Settings still to apply; empty once applied or set aside. */
       setup: SetupItem[]
       usage: Usage
+      /** Whether finished agents are listed or folded into one line. */
+      showDone: boolean
     }
   }
 }
