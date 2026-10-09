@@ -545,3 +545,16 @@ describe('names stay plain unless two live agents share one', () => {
   })
 })
 
+describe('agents Claude Code no longer lists', () => {
+  test('stop showing as running once they drop off the list (no ghosts)', async ($: any, on: any) => {
+    on('agent.list', () => ({ value: [] })) // Claude Code has dropped the agent
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
+    await clock.advance(60_000) // REDhelm checks the list every 1.5 s
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /1 finished/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /working/ })).toBeUndefined()
+    await ui.unmount()
+  })
+})
+

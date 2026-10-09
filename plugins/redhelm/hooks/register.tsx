@@ -40,6 +40,8 @@ const usage = atom(USAGE, {})
 
 const ENDED = new Set(['completed', 'failed', 'killed'])
 const LIVE = new Set(['pending', 'running', 'waiting'])
+/** How long an agent may be missing from Claude Code's list before REDhelm counts it as finished. */
+const GRACE_MS = 20_000
 
 /** Bookkeeping never gets in the way of the call it watches. */
 const quietly = async (work: () => Promise<unknown>) => {
@@ -114,6 +116,14 @@ async function sync($: $) {
         description: info.description || a.description,
         status: info.status,
         endedAt: ENDED.has(info.status) ? a.endedAt ?? at : undefined,
+      }
+    }
+    // Claude Code drops an agent from its list once it is done; one REDhelm still shows as live,
+    // gone from the list past a short grace, has finished (no ghosts "running" for hours).
+    const listed = new Set(list.map(i => i.id))
+    for (const a of Object.values(next)) {
+      if (LIVE.has(a.status) && !listed.has(a.id) && at - a.startedAt > GRACE_MS) {
+        next[a.id] = { ...a, status: 'completed', endedAt: a.endedAt ?? at, activity: undefined }
       }
     }
     const finished = Object.values(next).filter(a => ENDED.has(a.status)).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
