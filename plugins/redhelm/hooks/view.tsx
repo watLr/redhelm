@@ -397,8 +397,8 @@ export function Sheet({ els, v, act, columns }: { els: Els; v: View; act: Action
           <Field els={els} name="Recent steps">
             {grouped(a.steps).slice(0, 6).map((st, i) => (
               <Box key={`st-${i}`} justifyContent="space-between" gap={2}>
-                <Text wrap="truncate-end">{st.text}{st.count > 1 ? <Text color="subtle"> · {st.count} times</Text> : ''}</Text>
-                {st.at !== undefined && <Text color="subtle">{ago(v.now - st.at)}</Text>}
+                <Text wrap="truncate-end">{st.text}{st.count > 1 ? <Text color="subtle"> ×{st.count}</Text> : ''}</Text>
+                {st.at !== undefined && <Box flexShrink={0}><Text color="subtle">{ago(v.now - st.at)}</Text></Box>}
               </Box>
             ))}
           </Field>

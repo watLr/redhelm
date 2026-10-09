@@ -335,7 +335,7 @@ export const fromConversation = (said: Said[], root: string): Partial<Agent> => 
   }
 }
 
-/** Steps in a row that read the same fold into one line with a count ("Edit review.md · 6 times"). */
+/** Steps in a row that read the same fold into one line with a count ("Edit review.md ×6"). */
 export const grouped = (steps: Agent['steps']) =>
   steps.reduce<(Agent['steps'][number] & { count: number })[]>((out, s) => {
     const last = out.at(-1)
