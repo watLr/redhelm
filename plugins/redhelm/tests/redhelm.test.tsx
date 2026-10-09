@@ -12,7 +12,7 @@ import { label, rack, relevant, shortName, summary, type View } from '../hooks/v
 
 const agent = (over: Partial<Agent>): Agent => ({
   id: 'a1', name: 'docs', type: 'general-purpose', description: 'Rewrite the setup guide', status: 'running',
-  context: 0, startedAt: 0, recent: [], files: [], edits: 0, fails: 0, ...over,
+  context: 0, startedAt: 0, recent: [], files: [], edits: 0, fails: 0, steps: [], ...over,
 })
 
 /** An in-memory folder tree standing in for $.fs. */
@@ -134,6 +134,17 @@ const PANE = {
   props: { title: 'REDhelm', isFocused: true, bodyColumns: 48, placement: 'dock' },
 } as const
 
+const SHEET = {
+  plugin: 'redhelm', component: 'Pane', requestId: 'redhelm-agent',
+  props: { title: 'Agent', isFocused: true, bodyColumns: 70, placement: 'inline' },
+} as const
+
+/** Click an agent's name on the panel, then look at the sheet it opens. */
+const openSheet = async ($: any, ui: any, id: string, surface = 'terminal') => {
+  await ui.press({ key: `sel-${id}` })
+  return $.ui.mount({ ...SHEET, surface } as any)
+}
+
 /** Beneath REDhelm: the engine's session, spawn and tools answer without running anything. */
 /** The mocked clock of the latest engine(), so a test can move time on. */
 let clock: any
@@ -167,12 +178,12 @@ describe('the pane', () => {
       const ui = await $.ui.mount({ ...PANE, surface } as any)
       expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('Docs')
       expect(await ui.find({ type: 'Text', text: /is writing code/ })).toBeDefined()
-      await ui.press({ key: 'sel-a1' })
-      expect(await ui.find({ type: 'Text', text: /Task: Rewrite the setup guide/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /Model: Opus 5\.5/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /Right now: Edit setup\.md/ })).toBeDefined()
-      expect(await ui.find({ key: 'compose-a1' })).toBeDefined() // messaging goes through the prompt, so every surface has it
-      await ui.press({ key: 'sel-a1' })
+      const sheet = await openSheet($, ui, 'a1', surface)
+      expect(await sheet.find({ type: 'Text', text: /Asked to/ })).toBeDefined()
+      expect(await sheet.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
+      expect(await sheet.find({ type: 'Text', text: /Edit setup\.md/ })).toBeDefined()
+      expect(await sheet.find({ key: 'compose-a1' })).toBeDefined() // messaging goes through the prompt, so every surface has it
+      await sheet.unmount()
       await ui.unmount()
     }
   })
@@ -217,7 +228,7 @@ describe('the pane', () => {
 describe('the rack', () => {
   test('orders strips by who needs you next and pulls out the ones that do', async () => {
     const v = {
-      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, root: '/p', handles: {}, lanes: {},
+      now: 0, notes: [], workspaces: [], guard: {}, inspecting: null, briefOpen: false, theme: 'dark' as const, composing: null, setup: [], showDone: false, aside: false, root: '/p', handles: {}, lanes: {},
       agents: [
         agent({ id: 'run', startedAt: 1 }),
         agent({ id: 'done', status: 'completed', endedAt: 5 }),
@@ -359,8 +370,9 @@ describe('messaging an agent', () => {
     await engine(on, true)($)
     await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    await ui.press({ key: 'sel-a1' })
-    await ui.press({ key: 'compose-a1' })
+    const sheet = await openSheet($, ui, 'a1')
+    await sheet.press({ key: 'compose-a1' })
+    await sheet.unmount()
     await new Promise<void>(r => setTimeout(() => r(), 40))
     expect(filled).toBe('→ docs: ')
     await ui.unmount()
@@ -376,8 +388,9 @@ describe('messaging an agent', () => {
     await engine(on, true)($)
     await $.agent.spawn({ prompt: 'x', description: 'echo: test target for REDhelm Message', subagentType: 'general-purpose' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    await ui.press({ key: 'sel-a1' })
-    await ui.press({ key: 'compose-a1' })
+    const sheet = await openSheet($, ui, 'a1')
+    await sheet.press({ key: 'compose-a1' })
+    await sheet.unmount()
     await new Promise<void>(r => setTimeout(() => r(), 40))
     await ui.unmount()
     const r = await $.prompt.submit({ text: `${filled}Hi` })
@@ -394,7 +407,8 @@ describe('messaging an agent', () => {
     await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
     await $.session.send({ to: 'lead', text: 'Ready to merge?', agentId: 'a1' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    expect(await ui.find({ type: 'Text', text: /Docs needs your answer/ })).toBeDefined()
+    expect((await ui.find({ key: 'sel-a1' }))?.text).toBe('Docs')
+    expect(await ui.find({ type: 'Text', text: /Asks you/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Ready to merge\?/ })).toBeDefined()
     await ui.press({ key: 'compose-a1' })
     await new Promise<void>(r => setTimeout(() => r(), 40))
@@ -405,7 +419,7 @@ describe('messaging an agent', () => {
 })
 
 describe('what REDhelm chooses to show', () => {
-  const base = { now: 0, notes: [], inbox: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, handles: {}, lanes: {} }
+  const base = { now: 0, notes: [], inbox: [], guard: {}, inspecting: null, briefOpen: false, theme: 'dark' as const, composing: null, setup: [], showDone: false, aside: false, handles: {}, lanes: {} }
 
   test("only this session's workflows, or ones an agent here is changing; finished runs stay quiet", async () => {
     const ws = (dir: string, extra: object) => ({ dir, name: dir.split('/').pop()!, ...extra })
@@ -441,8 +455,9 @@ describe('your draft is never sent to an agent', () => {
     await engine(on, true)($)
     await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    await ui.press({ key: 'sel-a1' })
-    await ui.press({ key: 'compose-a1' })
+    const sheet = await openSheet($, ui, 'a1')
+    await sheet.press({ key: 'compose-a1' })
+    await sheet.unmount()
     await new Promise<void>(r => setTimeout(() => r(), 40))
     expect(box).toBe('→ docs: ')
     await $.prompt.submit({ text: `${box}please also cover Windows` })
@@ -452,7 +467,7 @@ describe('your draft is never sent to an agent', () => {
     await ui.unmount()
   })
 
-  test("a question's card says what the agent is working on and when it asked", async ($: any, on: any) => {
+  test("a question's card says what the agent is on and when it asked; its sheet has the steps", async ($: any, on: any) => {
     on('session.send', () => ({ isDelivered: true }))
     on('agent.list', () => ({ value: [] }))
     await engine(on, true)($)
@@ -460,9 +475,12 @@ describe('your draft is never sent to an agent', () => {
     await $.tool.call({ tool: 'Edit', file_path: 'src/Button.tsx', old_string: 'a', new_string: 'b', agentId: 'a1' })
     await $.session.send({ to: 'lead', text: 'Should I use blue or green for the save button?', agentId: 'a1' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    expect(await ui.find({ type: 'Text', text: /Asker needs your answer/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Working on: Choose colors for the settings page/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Was just: Edit Button\.tsx/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Asks you/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Choose colors for the settings page/ })).toBeDefined()
+    const sheet = await openSheet($, ui, 'a1')
+    expect(await sheet.find({ type: 'Text', text: /Edit Button\.tsx/ })).toBeDefined() // its recent steps
+    expect(await sheet.find({ type: 'Text', text: /Should I use blue or green/ })).toBeDefined()
+    await sheet.unmount()
     expect(await ui.find({ type: 'Text', text: /just now/ })).toBeDefined()
     await ui.unmount()
   })
@@ -480,8 +498,9 @@ describe('two agents with the same name', () => {
     await $.agent.spawn({ prompt: 'x', description: 'asker', subagentType: 'general-purpose', name: 'asker' })
     await $.agent.spawn({ prompt: 'x', description: 'asker', subagentType: 'general-purpose', name: 'asker' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    await ui.press({ key: 'sel-a2' })
-    await ui.press({ key: 'compose-a2' })
+    const sheet = await openSheet($, ui, 'a2')
+    await sheet.press({ key: 'compose-a2' })
+    await sheet.unmount()
     await new Promise<void>(r => setTimeout(() => r(), 40))
     expect(box).toBe('→ asker a2: ')
     await $.prompt.submit({ text: `${box}yes` })
@@ -500,7 +519,7 @@ describe('waiting is not the same as waiting for you', () => {
     await $.session.send({ to: 'echo', text: 'are you done?', agentId: 'a2' })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: /is waiting for Echo/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /needs your answer/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Asks you/ })).toBeUndefined()
     await ui.unmount()
   })
 })

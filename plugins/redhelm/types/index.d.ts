@@ -8,6 +8,12 @@ export type Agent = {
   status: AgentStatus
   model?: string
   effort?: string
+  /** The instructions it was started with (first 2000 characters). */
+  brief?: string
+  /** Its last few actions, newest first, for the agent sheet. */
+  steps: { text: string; at: number }[]
+  /** The last thing it wrote while working, a sentence or two. */
+  thinking?: string
   /** The agent it messaged and is waiting on, until it gets back to work. */
   waitingOn?: string
   /** What it is doing right now: the last tool call, short. */
@@ -81,7 +87,6 @@ declare module 'claude-code' {
       inbox: Message[]
       workspaces: Workspace[]
       guard: Guard
-      selected: string | null
       composing: string | null
       now: number
       placement: Placement
@@ -94,6 +99,10 @@ declare module 'claude-code' {
       showDone: boolean
       /** A draft for Claude was set aside while you message an agent; it comes back after. */
       aside: boolean
+      /** The agent whose sheet is open. */
+      inspecting: string | null
+      /** Whether the sheet shows the agent's whole brief. */
+      briefOpen: boolean
     }
   }
 }

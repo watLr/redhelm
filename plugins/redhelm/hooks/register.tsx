@@ -4,11 +4,13 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Agent, Guard, Note, Placement, SetupItem } from '../types'
 import { DEFAULTS, LINES, activity, capital, handleOf, handles, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
 import { laneNames, workspaces, type Io } from './sources'
-import { Alert, Panel, type Actions, type Els, type View } from './view'
+import { Alert, Panel, Sheet, type Actions, type Els, type View } from './view'
 
 type $ = EngineInterface
 
 const PANE = 'redhelm'
+/** The agent sheet: a second pane, opened as a dialog over one agent. */
+const SHEET = 'redhelm-agent'
 const TITLE = 'REDhelm'
 
 const AGENTS = { plugin: 'redhelm', key: 'agents' } as const
@@ -25,7 +27,9 @@ const notes = atom({ plugin: 'redhelm', key: 'notes' } as const, [])
 const inbox = atom({ plugin: 'redhelm', key: 'inbox' } as const, [])
 const spaces = atom(WORKSPACES, [])
 const guard = atom(GUARD, {})
-const selected = atom({ plugin: 'redhelm', key: 'selected' } as const, null)
+const INSPECTING = { plugin: 'redhelm', key: 'inspecting' } as const
+const inspecting = atom(INSPECTING, null)
+const briefOpen = atom({ plugin: 'redhelm', key: 'briefOpen' } as const, false)
 const COMPOSING = { plugin: 'redhelm', key: 'composing' } as const
 const composing = atom(COMPOSING, null)
 const now = atom({ plugin: 'redhelm', key: 'now' } as const, 0)
@@ -46,7 +50,7 @@ const quietly = async (work: () => Promise<unknown>) => {
 
 const blank = (id: string, at: number): Agent => ({
   id, name: '', type: 'agent', description: '', status: 'running',
-  context: 0, startedAt: at, recent: [], files: [], edits: 0, fails: 0,
+  context: 0, startedAt: at, recent: [], files: [], edits: 0, fails: 0, steps: [],
 })
 
 /** Change one agent, creating it if its first event beat the spawn hook. */
@@ -128,6 +132,8 @@ async function sync($: $) {
 let cfg: Settings = settings()
 /** A draft meant for Claude, held while you message an agent and put back after. */
 let setAside: string | undefined
+/** The person's theme, so REDhelm's surfaces match it. */
+let theme: 'light' | 'dark' = 'dark'
 /** The session's project root (set at session start). */
 let root = ''
 /** Off in sessions nobody watches (claude -p, SDK, spawned runs): every hook passes straight through. */
@@ -178,6 +184,8 @@ async function checkStale($: $) {
 
 /** Re-reads workspaces and the stale check; writes only on change, so idle polling never redraws. */
 async function refresh($: $) {
+  const t = (await $.settings.read()).theme
+  theme = typeof t === 'string' && t.includes('light') ? 'light' : 'dark'
   const list = await workspaces(await io($))
   if (!same((await $.state.get(WORKSPACES)).value, list)) await $.state.set(WORKSPACES, list)
   await checkStale($)
@@ -312,10 +320,18 @@ function actions($: $): Actions {
   const open = () => void $.ui.open({ id: PANE, title: TITLE, focus: true }).catch(() => {})
   return {
     open,
-    select: id => void update($, selected, () => id).then(() => update($, composing, () => null)),
+    inspect: id =>
+      void (async () => {
+        await update($, briefOpen, () => false)
+        await update($, inspecting, () => id)
+        if (!id) return $.ui.close({ id: SHEET })
+        await $.ui.open({ id: SHEET, title: await nameOf($, id), focus: true, closeOnEscape: true, rows: 24 })
+      })().catch(() => {}),
+    toggleBrief: () => void update($, briefOpen, x => !x),
     compose: id =>
       void (async () => {
         if (!id) return update($, composing, () => null)
+        if ((await $.state.get(INSPECTING)).value === id) await $.ui.close({ id: SHEET }).catch(() => {})
         // What you were typing to Claude is set aside, never sent to the agent; it comes back after.
         const text = (await $.prompt.read()).text
         const already = text.match(ADDRESS)
@@ -359,7 +375,9 @@ async function view($: $): Promise<View> {
     inbox: await read($, inbox),
     workspaces: list,
     guard: await read($, guard),
-    selected: await read($, selected),
+    inspecting: await read($, inspecting),
+    briefOpen: await read($, briefOpen),
+    theme,
     composing: await read($, composing),
     setup: await read($, setup),
     showDone: await read($, showDone),
@@ -485,6 +503,7 @@ export const register: Register = (on, options) => {
       await quietly(async () => {
         await patch($, id, () => ({
           model: r.model, type: e.subagentType, name: e.name ?? '', description: e.description, status: 'running',
+          brief: e.prompt.slice(0, 2000),
         }))
         await note($, { kind: 'spawn', text: `${e.name || e.description}  ${short(r.model)}`, agentId: id })
         await show($)
@@ -505,7 +524,10 @@ export const register: Register = (on, options) => {
         const row = all[m] ?? { requests: 0, output: 0, agents: 0 }
         return { ...all, [m]: { requests: row.requests + 1, output: row.output + (u?.output_tokens ?? 0), agents: row.agents + (e.agentId ? 1 : 0) } }
       })
-      if (e.agentId) return patch($, e.agentId, a => ({ model: e.model, effort: effort ?? a.effort, context: context || a.context }))
+      if (e.agentId) {
+        const said = excerpt(result.answer, 300)
+        return patch($, e.agentId, a => ({ model: e.model, effort: effort ?? a.effort, context: context || a.context, thinking: said || a.thinking }))
+      }
       chosen ??= e.model
       const switched = cfg.guard !== 'off' && base(e.model) !== base(chosen) ? `${short(chosen)} → ${short(e.model)}` : undefined
       const before = (await $.state.get(GUARD)).value ?? {}
@@ -530,11 +552,13 @@ export const register: Register = (on, options) => {
         : next(e)
     }
     const input = e as unknown as Record<string, unknown>
+    const now = await $.clock.now()
     await quietly(() => {
       const file = changedFile(e.tool, input)
       const path = file && relative(file, root)
       return patch($, id, a => ({
         waitingOn: undefined,
+        steps: [{ text: activity(e.tool, input), at: now }, ...(a.steps ?? [])].slice(0, 8),
         activity: activity(e.tool, input),
         recent: [...a.recent, kindOf(e.tool)].slice(-8),
         ...(path && { files: [...a.files.filter(f => f !== path), path].slice(-30), edits: a.edits + 1 }),
@@ -619,6 +643,10 @@ export const register: Register = (on, options) => {
       shape={{ kind: e.props.placement === 'dock' ? 'tall' : 'wide', columns: e.props.bodyColumns, rows: e.viewport?.rows ?? 12 }}
     />
   })
+
+  on('ui.render', { component: 'Pane', requestId: SHEET }, async ($, e) => (
+    <Sheet els={elements($.ui.resolve(e), e.surface)} v={await view($)} act={actions($)} columns={e.props.bodyColumns} />
+  ))
 
   /** Above the prompt: the whole rack in bottom placement, otherwise only a pulled-out strip. */
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
