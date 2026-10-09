@@ -17,7 +17,6 @@ export type Els = Pick<Table, 'Box' | 'Text' | 'Button'> & { Input?: Table['Inpu
 export type Actions = {
   select: (id: string | null) => void
   compose: (id: string | null) => void
-  send: (id: string, text: string) => void
   stop: (id: string) => void
   dismiss: (messageId: string) => void
   open: () => void
@@ -86,7 +85,7 @@ const doing = (a: Agent) =>
 
 /** The expanded strip: its task, its last word, what it touched, and what you can do. */
 function Drawer({ els, s, v, act, indent }: { els: Els; s: Strip; v: View; act: Actions; indent: number }) {
-  const { Box, Text, Button, Input } = els
+  const { Box, Text, Button } = els
   const a = s.agent
   const live = LIVE.has(a.status)
   return (
@@ -99,21 +98,14 @@ function Drawer({ els, s, v, act, indent }: { els: Els; s: Strip; v: View; act: 
           {a.files.length > 3 ? `  +${a.files.length - 3}` : ''}
         </Text>
       )}
-      {v.composing === a.id && Input ? (
-        <Input
-          key={`msg-${a.id}`}
-          autoFocus
-          placeholder={`Message ${label(a, v.lanes)}`}
-          submitLabel="send"
-          onSubmit={(text: string) => text.trim() && act.send(a.id, text.trim())}
-        />
-      ) : (
-        (live || s.messages.length > 0) && (
-          <Box gap={2} marginTop={1}>
-            {Input && <Button key={`compose-${a.id}`} label={s.messages.length ? 'Reply' : 'Message'} variant="primary" onPress={() => act.compose(a.id)} />}
-            {live && <Button key={`stop-${a.id}`} label="Stop" onPress={() => act.stop(a.id)} />}
-          </Box>
-        )
+      {v.composing === a.id && (
+        <Text color={C.attention}>↓ type in the prompt below · Enter sends to {label(a, v.lanes)}</Text>
+      )}
+      {(live || s.messages.length > 0) && (
+        <Box gap={2} marginTop={1}>
+          <Button key={`compose-${a.id}`} label={s.messages.length ? 'Reply' : 'Message'} variant="primary" onPress={() => act.compose(a.id)} />
+          {live && <Button key={`stop-${a.id}`} label="Stop" onPress={() => act.stop(a.id)} />}
+        </Box>
       )}
     </Box>
   )

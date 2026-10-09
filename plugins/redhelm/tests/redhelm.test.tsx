@@ -155,7 +155,7 @@ const engine = (on: any, isInteractive: boolean) => async ($: any) => {
 }
 
 describe('the pane', () => {
-  test('a spawned agent shows live on every surface, with messaging only where there is input', async ($, on) => {
+  test('a spawned agent shows live on every surface, with Message on each', async ($, on) => {
     await engine(on, true)($)
     await $.agent.spawn({ prompt: 'rewrite', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' } as any)
     await $.tool.call({ tool: 'Edit', file_path: 'src/guide/setup.md', old_string: 'a', new_string: 'b', agentId: 'a1' } as any)
@@ -167,9 +167,7 @@ describe('the pane', () => {
       expect(await ui.find({ type: 'Text', text: /Edit setup\.md/ })).toBeDefined()
       await ui.press({ key: 'sel-a1' })
       expect(await ui.find({ type: 'Text', text: /Rewrite the setup guide/ })).toBeDefined()
-      const message = await ui.find({ key: 'compose-a1' })
-      if (surface === 'mobile') expect(message).toBeUndefined()
-      else expect(message).toBeDefined()
+      expect(await ui.find({ key: 'compose-a1' })).toBeDefined() // messaging goes through the prompt, so every surface has it
       await ui.press({ key: 'sel-a1' })
       await ui.unmount()
     }
@@ -334,6 +332,34 @@ describe('the bottom bar', () => {
       board: { stages: ['Done'], rows: [{ id: 'P1', stages: {}, note: '', at: 0 }], total: 4 },
       runs: [{ name: 'demo-run', status: 'ACTIVE', open: 2 }],
     })).toBe('Demo app 1 open · demo-run active')
+  })
+})
+
+describe('messaging an agent', () => {
+  test('a prompt addressed "→ name: …" goes to that agent, not to Claude', async ($: any, on: any) => {
+    const sent: any[] = []
+    on('session.send', (_: any, e: any) => (sent.push(e), { isDelivered: true }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
+    const r = await $.prompt.submit({ text: '→ docs: please also cover Windows' })
+    expect(sent.map(e => [e.to, e.text])).toEqual([['a1', 'please also cover Windows']])
+    expect(r.drop).toMatch(/→ docs: sent/)
+    expect((await $.prompt.submit({ text: 'an ordinary prompt' })).text).toBe('an ordinary prompt')
+  })
+
+  test('Message puts the address in your prompt, where your keyboard already is', async ($: any, on: any) => {
+    let filled = ''
+    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+    on('prompt.fill', (_: any, e: any) => ((filled = e.text), { isFilled: true }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'sel-a1' })
+    await ui.press({ key: 'compose-a1' })
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    expect(filled).toBe('→ docs: ')
+    await ui.unmount()
   })
 })
 

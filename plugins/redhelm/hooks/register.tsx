@@ -60,9 +60,19 @@ async function note($: $, n: Omit<Note, 'at'>) {
   await update($, notes, list => [...list, { ...n, at }].slice(-40))
 }
 
-const nameOf = async ($: $, id: string) => {
-  const a = (await $.state.get(AGENTS)).value?.[id]
-  return a?.name || excerpt(a?.description, 24) || a?.type || 'agent'
+/** What an agent is called in REDhelm's messages and in the "→ name:" address. */
+const labelOf = (a?: Agent) => a?.name || excerpt(a?.description, 24) || a?.type || 'agent'
+
+const nameOf = async ($: $, id: string) => labelOf((await $.state.get(AGENTS)).value?.[id])
+
+/** A prompt addressed to an agent: "→ name: message". */
+const ADDRESS = /^→ ([^:\n]+): ([\s\S]*)$/
+
+/** The agent an address names, preferring one still running. */
+async function agentNamed($: $, name: string) {
+  const all = Object.values((await $.state.get(AGENTS)).value ?? {})
+  const named = all.filter(a => labelOf(a).toLowerCase() === name.trim().toLowerCase())
+  return (named.find(a => LIVE.has(a.status)) ?? named[0])?.id
 }
 
 /** The sources' window on the host: the session root and $.fs. */
@@ -74,6 +84,16 @@ async function io($: $): Promise<Io> {
     list: dir => $.fs.list(dir),
     exists: path => $.fs.exists(path),
   }
+}
+
+/** TEMP (debugging Message): appends one line to ~/.claude/redhelm/trace.log. Remove after the fix. */
+async function trace($: $, line: string) {
+  try {
+    const dir = `${(await $.env.get('HOME')) ?? ''}/.claude/redhelm`
+    const path = `${dir}/trace.log`
+    const prev = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
+    await $.fs.write(path, `${prev}${new Date(await $.clock.now()).toISOString()} ${line}\n`)
+  } catch {}
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
@@ -291,21 +311,23 @@ function actions($: $): Actions {
   const open = () => void $.ui.open({ id: PANE, title: TITLE, focus: true }).catch(() => {})
   return {
     open,
-    select: id => void update($, selected, () => id).then(() => update($, composing, () => null)),
-    compose: id => void update($, composing, () => id),
-    dismiss: messageId => void update($, inbox, list => list.filter(m => m.id !== messageId)),
-    send: (id, text) =>
+    select: id => void trace($, `select ${id}`).then(() => update($, selected, () => id)).then(() => update($, composing, () => null)),
+    compose: id =>
       void (async () => {
-        const { isDelivered, reason } = await $.session.send({ to: { agentId: id }, text })
-        await update($, composing, () => null)
-        if (!isDelivered) return $.ui.toast(`Not delivered: ${reason ?? 'unknown reason'}`)
-        await update($, inbox, list => list.filter(m => m.agentId !== id))
-        await note($, { kind: 'reply', text: `you → ${await nameOf($, id)}: ${excerpt(text, 60)}`, agentId: id })
+        if (!id) return update($, composing, () => null)
+        await trace($, `compose ${id}`)
+        const draft = (await $.prompt.read()).text.replace(ADDRESS, '$2')
+        const { isFilled } = await $.prompt.fill({ text: `→ ${await nameOf($, id)}: ${draft}`, mode: 'replace' })
+        if (isFilled) await update($, composing, () => id)
+        else $.ui.toast('Could not reach the prompt; type → name: your message')
       })(),
+    dismiss: messageId => void update($, inbox, list => list.filter(m => m.id !== messageId)),
     stop: id =>
       void (async () => {
         const name = await nameOf($, id)
-        await $.tool.call({ tool: 'TaskStop', task_id: id })
+        await trace($, `stop ${id}`)
+        const r = await $.tool.call({ tool: 'TaskStop', task_id: id })
+        await trace($, `stop result ${JSON.stringify(r).slice(0, 200)}`)
         await note($, { kind: 'fail', text: `${name} stopped by you`, agentId: id })
       })(),
     applySetup: () => void quietly(() => applySetup($)),
@@ -409,7 +431,24 @@ export const register: Register = (on, options) => {
 
   /** The guard at the door: a prompt waits while the model is not the one chosen, and once when the session fell behind. */
   on('prompt.submit', async ($, e, next) => {
-    if (!active || cfg.guard !== 'hold') return next(e)
+    if (!active) return next(e)
+    // A prompt addressed "→ name: …" goes to that agent instead of Claude.
+    const address = e.text.match(ADDRESS)
+    const to = address && (await agentNamed($, address[1]!))
+    if (address && to) {
+      const name = address[1]!.trim()
+      const text = address[2]!.trim()
+      if (!text) return { drop: `REDhelm: nothing to send to ${name}` }
+      await trace($, `send ${to} (${text.length} chars, from prompt)`)
+      const { isDelivered, reason } = await $.session.send({ to: { agentId: to }, text })
+      await trace($, `send result delivered=${isDelivered} reason=${reason ?? '-'}`)
+      await update($, composing, () => null)
+      if (!isDelivered) return { drop: `REDhelm: not delivered to ${name} (${reason ?? 'unknown reason'})` }
+      await update($, inbox, list => list.filter(m => m.agentId !== to))
+      await note($, { kind: 'reply', text: `you → ${name}: ${excerpt(text, 60)}`, agentId: to })
+      return { drop: `→ ${name}: sent` }
+    }
+    if (cfg.guard !== 'hold') return next(e)
     const g = (await $.state.get(GUARD)).value ?? {}
     if (g.fallback) {
       return { drop: `REDhelm: this session switched models on its own (${g.fallback}). Run /model to choose, then send again.` }
@@ -552,14 +591,14 @@ export const register: Register = (on, options) => {
     return r
   }).catch(($, e, next) => next(e)) // fail open: an error in REDhelm never holds your work)
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => (
-    <Panel
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    return <Panel
       els={elements($.ui.resolve(e), e.surface)}
       v={await view($)}
       act={actions($)}
       shape={{ kind: e.props.placement === 'dock' ? 'tall' : 'wide', columns: e.props.bodyColumns, rows: e.viewport?.rows ?? 12 }}
     />
-  ))
+  })
 
   /** Above the prompt: the whole rack in bottom placement, otherwise only a pulled-out strip. */
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
