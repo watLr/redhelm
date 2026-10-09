@@ -3,17 +3,15 @@
 A live sidebar for your Claude Code agents. See what every agent is doing, where its
 work is landing, and which one needs you — and know which model is actually answering.
 
-```
-REDhelm                                                    2 working
-[D] Docs  is writing code                                    4 min  ›
-[A] Api   is waiting on work it started                      9 min  ›
-```
+![REDhelm docked beside the conversation: one agent asks a question, three are working](docs/images/redhelm-right.png)
 
-> **Status: early release (0.4).** Covered by tests and checked with real agents:
+> **Status: early release (0.4.1).** Covered by tests and checked with real agents:
 > the agent list and sheet, **Message** and **Stop**, the model guard, settings and
 > workflows. Issues welcome.
 
 ## What it does
+
+![A question from an agent, and an agent's sheet](docs/images/redhelm-sheet.png)
 
 - **Your agents, in plain words.** One row per agent: what it is doing right now
   (reading the code, writing code, running checks), and for how long. An agent waiting
@@ -56,6 +54,8 @@ Restart running sessions (`/restart`) to load it.
 | `/redhelm right` · `/redhelm bottom` | Sidebar beside the conversation, or a bar above the prompt |
 | `/redhelm setup` | Review the Claude Code settings REDhelm recommends |
 | `/redhelm models` | Which models actually answered this session, and recent switches |
+
+![REDhelm above the prompt](docs/images/redhelm-bottom.png)
 
 The right sidebar needs Claude Code's fullscreen layout (`"tui": "fullscreen"`) and a
 terminal at least 110 columns wide. That minimum is Claude Code's own and plugins cannot
