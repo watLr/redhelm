@@ -62,6 +62,8 @@ describe('what agents do', () => {
   test('tool calls read as phase, activity and changed files', async () => {
     expect(activity('Edit', { file_path: '/p/src/app/server.ts' })).toBe('Edit server.ts')
     expect(activity('Bash', { command: 'npm test -- --watch' })).toBe('Bash npm test')
+    expect(activity('Monitor', { command: 'until [ -f out ]; do sleep 1; done', description: 'Wait for the build' })).toBe('Wait for the build')
+    expect(activity('SendMessage', { to: 'main', message: 'Done?' })).toBe('Message to main')
     expect(phase(['exploring', 'building', 'building', 'checking'])).toBe('building')
     expect(phase(['building', 'checking'])).toBe('checking')
     expect(kindOf('Grep')).toBe('exploring')

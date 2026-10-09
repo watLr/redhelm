@@ -372,11 +372,18 @@ function actions($: $): Actions {
     open,
     inspect: id =>
       void (async () => {
+        if (!id) {
+          await update($, inspecting, () => null)
+          return $.ui.close({ id: SHEET })
+        }
+        // Opened first, inside the press: Claude Code places a pane the person asked for at any width,
+        // while one a plugin opens on its own waits for a wide terminal.
+        const opening = $.ui.open({ id: SHEET, title: 'Agent', focus: true, closeOnEscape: true, rows: 24 })
         await update($, briefOpen, () => false)
         await update($, inspecting, () => id)
-        if (!id) return $.ui.close({ id: SHEET })
+        await opening
         await quietly(() => backfill($, id))
-        await $.ui.open({ id: SHEET, title: await nameOf($, id), focus: true, closeOnEscape: true, rows: 24 })
+        await $.ui.open({ id: SHEET, title: await nameOf($, id), closeOnEscape: true, rows: 24 })
       })().catch(() => {}),
     toggleBrief: () => void update($, briefOpen, x => !x),
     compose: id =>

@@ -187,13 +187,16 @@ const leaf = (path = '') => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 /** One tool call as a few words: "Edit server.ts", "Bash npm test". */
 export const activity = (tool: string, input: Record<string, unknown>) => {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
+  const file = leaf(str('file_path') || str('notebook_path') || str('path'))
+  // The agent's own few words ("Wait for the build") read better than the start of a shell command.
+  if (!file && str('description')) return excerpt(str('description'), 48)
   const target =
-    leaf(str('file_path') || str('notebook_path') || str('path')) ||
+    file ||
     str('command').trim().split(/\s+/).slice(0, 2).join(' ') ||
     str('pattern') ||
-    str('description') ||
+    (str('to') && `to ${str('to')}`) ||
     str('url')
-  const name = tool.startsWith('mcp__') ? tool.split('__').pop()! : tool
+  const name = tool === 'SendMessage' ? 'Message' : tool.startsWith('mcp__') ? tool.split('__').pop()! : tool
   return excerpt(`${name} ${target}`, 48)
 }
 
