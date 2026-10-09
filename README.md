@@ -3,38 +3,38 @@
 A live sidebar for your Claude Code agents. See what every agent is doing, where its
 work is landing, and which one needs you — and know which model is actually answering.
 
-REDhelm borrows one idea from air traffic control's flight progress strips: **every agent
-is a strip in a rack, ordered by who needs you next, and a strip that needs you is pulled
-out of line.** Only a strip's edge carries its state; the rest stays quiet.
-
 ```
-REDhelm  3 live · 2 done                Demo app 4 open · release-run active
- ▌ docs     building · Edit setup.md                 Opus 5.5 · xhigh   4m · 133k
-▌ api      ◆ Ready to merge?                         Opus 5.5 · high    9m · 201k
+REDhelm                                                    2 working
+[D] Docs  is writing code                                    4 min  ›
+[A] Api   is waiting on work it started                      9 min  ›
 ```
 
-> **Status: early release (0.3).** Covered by tests and checked with real agents:
-> the rack, **Message** and **Stop**, the model guard, settings and workflows.
-> Agent-to-you messages are newer. Issues welcome.
+> **Status: early release (0.4).** Covered by tests and checked with real agents:
+> the agent list and sheet, **Message** and **Stop**, the model guard, settings and
+> workflows. Issues welcome.
 
 ## What it does
 
-- **Agents rack** — one strip per agent: model and effort, what it is doing right now
-  (exploring, building, checking), run time and context size. Expand a strip for its
-  task, last answer and changed files, with **Message** and **Stop**. Message fills
-  your prompt with `→ name: `; type and press Enter to send it to that agent instead
-  of Claude (you can also type `→ name: message` yourself).
-- **Needs you** — an agent waiting on you, or one that sent you a message, is pulled
-  out of the rack with its message and a **Reply** button.
-- **Where work lands** — changed files grouped by folder, and a warning when two live
-  agents are editing the same file.
-- **Workflows** — picks up lane boards (`docs/aaa/board/lanes.json`), status boards
+- **Your agents, in plain words.** One row per agent: what it is doing right now
+  (reading the code, writing code, running checks), and for how long. An agent waiting
+  on another agent or on work it started says so; only a real question for you is
+  marked as needing you.
+- **Agent sheet.** Click an agent to see its task, its latest steps, what it is
+  thinking, the files it changed, its model and effort, and its last words. Agents that
+  started before REDhelm are filled in from Claude Code's record of their conversation.
+- **Message and Stop.** Message fills your prompt with `→ name: `; type and press Enter
+  to send it to that agent instead of Claude (you can also type `→ name: message`
+  yourself). What you were typing to Claude is set aside and comes back after.
+- **Needs you.** An agent that sent you a message gets a card with its message and a
+  **Reply** button.
+- **Where work lands.** A warning when two live agents edit the same file.
+- **Workflows.** Picks up lane boards (`docs/aaa/board/lanes.json`), status boards
   (`.status-board/`), REDStudio (`.redstudio/`) and REDManager (`.redmanager/`) in the
   project and shows their progress.
-- **Model guard** — if Claude Code switches models on its own, your next prompt and
+- **Model guard.** If Claude Code switches models on its own, your next prompt and
   Claude's tools wait until you choose with `/model`. If your saved default moved to a
   newer version, the session tells you once.
-- **Long-turn notifications** — a desktop notification (macOS, Linux) when a long turn
+- **Long-turn notifications.** A desktop notification (macOS, Linux) when a long turn
   finishes.
 
 ## Install
@@ -57,8 +57,10 @@ Restart running sessions (`/restart`) to load it.
 | `/redhelm setup` | Review the Claude Code settings REDhelm recommends |
 | `/redhelm models` | Which models actually answered this session, and recent switches |
 
-The right sidebar needs Claude Code's fullscreen layout (`"tui": "fullscreen"`); in the
-classic layout REDhelm opens above the prompt instead.
+The right sidebar needs Claude Code's fullscreen layout (`"tui": "fullscreen"`) and a
+terminal at least 110 columns wide. That minimum is Claude Code's own and plugins cannot
+change it; in a narrower terminal, or the classic layout, REDhelm opens above the prompt
+instead.
 
 ### Setup card
 
