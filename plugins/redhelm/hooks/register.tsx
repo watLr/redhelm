@@ -65,13 +65,27 @@ const labelOf = (a?: Agent) => a?.name || excerpt(a?.description, 24) || a?.type
 
 const nameOf = async ($: $, id: string) => labelOf((await $.state.get(AGENTS)).value?.[id])
 
-/** A prompt addressed to an agent: "→ name: message". */
+/**
+ * The name an address uses: the agent's own name, else the first words of its task, with no
+ * colon or ellipsis in it, so "→ handle: message" always reads back to the same agent.
+ */
+const handleOf = (a?: Agent) => {
+  const words = (a?.name || a?.description || a?.type || 'agent').replace(/[:\n…]+/g, ' ').trim().split(/\s+/)
+  let out = words[0]!.slice(0, 24)
+  for (const w of words.slice(1)) {
+    if (`${out} ${w}`.length > 24) break
+    out = `${out} ${w}`
+  }
+  return out
+}
+
+/** A prompt addressed to an agent: "→ handle: message". */
 const ADDRESS = /^→ ([^:\n]+): ([\s\S]*)$/
 
 /** The agent an address names, preferring one still running. */
 async function agentNamed($: $, name: string) {
   const all = Object.values((await $.state.get(AGENTS)).value ?? {})
-  const named = all.filter(a => labelOf(a).toLowerCase() === name.trim().toLowerCase())
+  const named = all.filter(a => handleOf(a).toLowerCase() === name.trim().toLowerCase())
   return (named.find(a => LIVE.has(a.status)) ?? named[0])?.id
 }
 
@@ -317,7 +331,7 @@ function actions($: $): Actions {
         if (!id) return update($, composing, () => null)
         await trace($, `compose ${id}`)
         const draft = (await $.prompt.read()).text.replace(ADDRESS, '$2')
-        const { isFilled } = await $.prompt.fill({ text: `→ ${await nameOf($, id)}: ${draft}`, mode: 'replace' })
+        const { isFilled } = await $.prompt.fill({ text: `→ ${handleOf((await $.state.get(AGENTS)).value?.[id])}: ${draft}`, mode: 'replace' })
         if (isFilled) await update($, composing, () => id)
         else $.ui.toast('Could not reach the prompt; type → name: your message')
       })(),

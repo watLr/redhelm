@@ -361,5 +361,24 @@ describe('messaging an agent', () => {
     expect(filled).toBe('→ docs: ')
     await ui.unmount()
   })
+
+  test('an agent named only by a description with a colon still gets its message (the address round-trips)', async ($: any, on: any) => {
+    let filled = ''
+    const sent: any[] = []
+    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+    on('prompt.fill', (_: any, e: any) => ((filled = e.text), { isFilled: true }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    on('session.send', (_: any, e: any) => (sent.push(e), { isDelivered: true }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'echo: test target for REDhelm Message', subagentType: 'general-purpose' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'sel-a1' })
+    await ui.press({ key: 'compose-a1' })
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    await ui.unmount()
+    const r = await $.prompt.submit({ text: `${filled}Hi` })
+    expect(sent.map(e => [e.to, e.text])).toEqual([['a1', 'Hi']])
+    expect(r.drop).toMatch(/sent/)
+  })
 })
 
