@@ -99,6 +99,18 @@ async function io($: $): Promise<Io> {
   }
 }
 
+/** Agents whose end REDhelm has already announced, so each is announced once. */
+const told = new Set<string>()
+
+/** "✓ docs finished": a note and, when wanted, a pop-up. */
+async function announce($: $, id: string, failed: boolean, said = '') {
+  if (told.has(id)) return
+  told.add(id)
+  const name = await nameOf($, id)
+  await note($, { kind: failed ? 'fail' : 'done', text: `${name}  ${excerpt(said, 60)}`, agentId: id })
+  if (cfg.agentToasts) $.ui.toast(`${failed ? '✕' : '✓'} ${name} ${failed ? 'failed' : 'finished'}`)
+}
+
 /** Agents whose conversation REDhelm has already read back, so each is read once. */
 const readBack = new Set<string>()
 
@@ -154,6 +166,13 @@ async function sync($: $) {
   const merged = merge(current)
   if (!same(current, merged)) await update($, agents, merge)
   for (const info of list) if (!current[info.id] && LIVE.has(info.status)) void quietly(() => backfill($, info.id))
+  // An agent whose turn ended while work it started was still running ends later; say so then.
+  // A ghost (dropped from the list unseen) is announced only if it had answered.
+  const listed = new Set(list.map(i => i.id))
+  for (const [id, a] of Object.entries(merged)) {
+    const was = current[id]
+    if (was && LIVE.has(was.status) && ENDED.has(a.status) && (listed.has(id) || was.answer)) await announce($, id, a.status === 'failed', was.answer)
+  }
   if (Object.values(merged).some(a => LIVE.has(a.status))) await update($, now, () => at)
 }
 
@@ -616,14 +635,15 @@ export const register: Register = (on, options) => {
         return
       }
       const failed = e.reason === 'error' || e.reason === 'refusal'
+      // A turn can end while work the agent started still runs (Claude Code lists it as waiting): not finished yet.
+      const held = (await $.agent.list()).find(i => i.id === id)
+      if (held && LIVE.has(held.status) && !e.isAborted && !failed) return patch($, id, () => ({ answer: excerpt(e.answer, 160), activity: undefined }))
       const at = await $.clock.now()
       await patch($, id, () => ({
         answer: excerpt(e.answer, 160), endedAt: at,
         status: e.isAborted ? 'killed' : failed ? 'failed' : 'completed', activity: undefined,
       }))
-      const name = await nameOf($, id)
-      await note($, { kind: failed ? 'fail' : 'done', text: `${name}  ${excerpt(e.answer, 60)}`, agentId: id })
-      if (cfg.agentToasts) $.ui.toast(`${failed ? '✕' : '✓'} ${name} ${failed ? 'failed' : 'finished'}`)
+      await announce($, id, failed, e.answer)
     })
     return r
   })

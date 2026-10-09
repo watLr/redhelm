@@ -595,3 +595,24 @@ describe('agents that started before REDhelm', () => {
     await ui.unmount()
   })
 })
+
+describe('an agent still waiting on work it started', () => {
+  test('is not called finished until Claude Code says it ended', async ($: any, on: any) => {
+    let status = 'waiting'
+    const toasts: string[] = []
+    on('agent.list', () => ({ value: [{ id: 'a1', name: 'probe', description: 'probe', type: 'general-purpose', status }] }))
+    on('turn.complete', () => ({ text: '' }))
+    on('ui.toast', (_$: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'probe', subagentType: 'general-purpose', name: 'probe' })
+    await $.turn.complete({ answer: 'Read the files; one wait still running', durationMs: 9000, isAborted: false, turnId: 't1', agentId: 'a1', reason: 'answer' })
+    await clock.advance(3_000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /waiting on work it started/ })).toBeDefined()
+    expect(toasts.some(t => /finished/.test(t))).toBe(false)
+    status = 'completed'
+    await clock.advance(3_000)
+    expect(toasts.filter(t => /probe finished/.test(t))).toHaveLength(1)
+    await ui.unmount()
+  })
+})

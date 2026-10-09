@@ -105,7 +105,7 @@ export const doing = (a: Agent, now?: number) => {
   // An old last action is not what it is doing now: say it has been quiet, and for how long.
   if (now && last && live && !a.waitingOn && now - last > QUIET_MS) return `has been quiet for ${minutes(now - last)}`
   return a.waitingOn && (a.status === 'running' || a.status === 'waiting') ? `is waiting for ${capital(a.waitingOn)}`
-  : a.status === 'waiting' ? 'is waiting'
+  : a.status === 'waiting' ? 'is waiting on work it started'
   : a.status === 'completed' ? 'finished'
   : a.status === 'failed' ? 'failed'
   : a.status === 'killed' ? 'was stopped'
