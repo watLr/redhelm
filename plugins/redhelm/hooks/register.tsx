@@ -658,7 +658,7 @@ export const register: Register = (on, options) => {
     const v = await view($)
     const act = actions($)
     if ((await read($, placement)) === 'bottom' && !(await read($, collapsed))) {
-      return <Panel els={els} v={v} act={act} shape={{ kind: 'wide', columns: e.props.bodyColumns, rows: Math.min(e.props.maxRows, 6) }} />
+      return <Panel els={els} v={v} act={act} shape={{ kind: 'wide', columns: e.props.bodyColumns, rows: Math.min(e.props.maxRows, 6), rule: true }} />
     }
     return Alert({ els, v, act }) ?? next(e)
   })

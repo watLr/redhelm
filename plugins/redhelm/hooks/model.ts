@@ -144,11 +144,19 @@ export const handleOf = (a?: Agent) => {
 
 /** Every agent's address, kept unique: a second "asker" becomes "asker aee7". */
 export const handles = (agents: Agent[]) => {
-  const count = new Map<string, number>()
-  for (const a of agents) count.set(handleOf(a).toLowerCase(), (count.get(handleOf(a).toLowerCase()) ?? 0) + 1)
+  const isLive = (a: Agent) => a.status === 'running' || a.status === 'waiting' || a.status === 'pending'
+  const key = (a: Agent) => handleOf(a).toLowerCase()
+  const all = new Map<string, number>()
+  const live = new Map<string, number>()
+  for (const a of agents) {
+    all.set(key(a), (all.get(key(a)) ?? 0) + 1)
+    if (isLive(a)) live.set(key(a), (live.get(key(a)) ?? 0) + 1)
+  }
+  // A name stays plain for the one live agent that has it; finished namesakes, or live twins, get a tag.
   return Object.fromEntries(agents.map(a => {
     const h = handleOf(a)
-    return [a.id, count.get(h.toLowerCase())! > 1 ? `${h} ${a.id.slice(0, 4)}` : h]
+    const tagged = all.get(key(a))! > 1 && (!isLive(a) || live.get(key(a))! > 1)
+    return [a.id, tagged ? `${h} ${a.id.slice(0, 4)}` : h]
   })) as Record<string, string>
 }
 

@@ -470,19 +470,19 @@ function NeedsLine({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actio
 }
 
 /** Bottom: wide and short. The same pieces, one line each; nothing wraps. */
-function Wide({ els, v, act, columns, rows }: { els: Els; v: View; act: Actions; columns: number; rows: number }) {
+function Wide({ els, v, act, columns, rows, rule }: { els: Els; v: View; act: Actions; columns: number; rows: number; rule: boolean }) {
   const { Box, Text } = els
   const strips = rack(v)
   const needs = strips.filter(s => s.cocked)
   const working = strips.filter(s => !s.cocked && LIVE.has(s.agent.status))
-  const room = Math.max(0, rows - 2 - (v.setup.length ? v.setup.length + 4 : 0)) // the rule and the header
+  const room = Math.max(0, rows - (rule ? 2 : 1) - (v.setup.length ? v.setup.length + 4 : 0)) // the rule and the header
   const shownNeeds = needs.slice(0, room)
   const shownWorking = working.slice(0, Math.max(0, room - shownNeeds.length))
   const hidden = needs.length + working.length - shownNeeds.length - shownWorking.length
   const right = v.guard.fallback || v.guard.stale ? null : relevant(v).map(summary).filter(Boolean).join('   ')
   return (
     <Box flexDirection="column" width={columns}>
-      <Text color={tone(v).rule}>{'─'.repeat(Math.max(1, columns))}</Text>
+      {rule && <Text color={tone(v).rule}>{'─'.repeat(Math.max(1, columns))}</Text>}
       <Box justifyContent="space-between" gap={3}>
         <Box flexShrink={0} gap={2}>
           <Brand els={els} />
@@ -498,12 +498,13 @@ function Wide({ els, v, act, columns, rows }: { els: Els; v: View; act: Actions;
   )
 }
 
-export type Shape = { kind: 'tall' | 'wide'; columns: number; rows: number }
+/** `rule`: draw the divider (the band above the prompt has no border of its own; a pane does). */
+export type Shape = { kind: 'tall' | 'wide'; columns: number; rows: number; rule?: boolean }
 
 export function Panel({ els, v, act, shape }: { els: Els; v: View; act: Actions; shape: Shape }) {
   return shape.kind === 'tall'
     ? <Tall els={els} v={v} act={act} columns={shape.columns} />
-    : <Wide els={els} v={v} act={act} columns={shape.columns} rows={shape.rows} />
+    : <Wide els={els} v={v} act={act} columns={shape.columns} rows={shape.rows} rule={!!shape.rule} />
 }
 
 /** With the panel closed: one line above the prompt, only when something needs you. */

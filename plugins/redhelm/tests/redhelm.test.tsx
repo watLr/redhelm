@@ -5,7 +5,7 @@ import type { Agent } from '../types'
 /** The test runtime has timers; the hooks environment's declarations leave them out. */
 declare const setTimeout: (fn: () => void, ms: number) => unknown
 import {
-  DEFAULTS, activity, doing, handleOf, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
+  DEFAULTS, activity, doing, handleOf, handles, settings, foldLanes, foldStatusBoard, isStale, kindOf, overlaps, parseRun, parseStandards, phase, remember, short, staleTarget,
 } from '../hooks/model'
 import { workspaces, type Io } from '../hooks/sources'
 import { label, rack, relevant, shortName, summary, type View } from '../hooks/view'
@@ -531,6 +531,17 @@ describe('saying what an agent is doing, truthfully', () => {
     const quiet = agent({ recent: ['exploring'], steps: [{ text: 'Read a.ts', at: now - 3 * 3600_000 }] })
     expect(doing(busy, now)).toBe('is reading the code')
     expect(doing(quiet, now)).toBe('has been quiet for 3 h 0 min')
+  })
+})
+
+describe('names stay plain unless two live agents share one', () => {
+  test('a live agent keeps its plain name; finished namesakes get the tag', async () => {
+    const live = agent({ id: 'ac82ffff', name: 'asker', status: 'running' })
+    const old1 = agent({ id: 'a4dfeeee', name: 'asker', status: 'completed' })
+    const old2 = agent({ id: 'aee7dddd', name: 'asker', status: 'completed' })
+    expect(handles([old1, live, old2])).toEqual({ ac82ffff: 'asker', a4dfeeee: 'asker a4df', aee7dddd: 'asker aee7' })
+    const twin = agent({ id: 'a9b6aaaa', name: 'asker', status: 'running' })
+    expect(handles([live, twin])).toEqual({ ac82ffff: 'asker ac82', a9b6aaaa: 'asker a9b6' })
   })
 })
 
