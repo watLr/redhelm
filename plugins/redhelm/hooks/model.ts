@@ -309,3 +309,25 @@ export const parseStandards = (text: string) => {
   const titles = [...text.matchAll(/^- \*\*S\d+ · [^·]+· ([^*]+?)\.?\*\*/gm)].map(m => (m[1] ?? '').trim())
   return { standards: titles.length, latest: titles.at(-1) }
 }
+
+/** One message of an agent's conversation, as Claude Code hands it back. */
+export type Said = { role: 'user' | 'assistant'; text: string; toolUses: { tool: string; input: Record<string, unknown>; isError?: true }[] }
+
+/**
+ * What an agent REDhelm did not watch from the start has done, read from its conversation:
+ * its brief, its latest steps (no times; the conversation keeps none), the files it changed and its latest words.
+ */
+export const fromConversation = (said: Said[], root: string): Partial<Agent> => {
+  const calls = said.flatMap(m => (m.role === 'assistant' ? m.toolUses : []))
+  const changed = calls.map(c => changedFile(c.tool, c.input)).filter((f): f is string => !!f).map(f => relative(f, root))
+  const spoke = said.filter(m => m.role === 'assistant' && m.text.trim()).at(-1)
+  return {
+    brief: said.find(m => m.role === 'user' && m.text.trim())?.text.slice(0, 2000),
+    steps: calls.slice(-8).reverse().map(c => ({ text: activity(c.tool, c.input) })),
+    recent: calls.slice(-8).map(c => kindOf(c.tool)),
+    files: [...new Set(changed.reverse())].reverse().slice(-30),
+    edits: changed.length,
+    fails: calls.filter(c => c.isError && kindOf(c.tool) === 'checking').length,
+    thinking: spoke && excerpt(spoke.text, 300),
+  }
+}

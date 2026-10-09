@@ -11,7 +11,8 @@ export type Agent = {
   /** The instructions it was started with (first 2000 characters). */
   brief?: string
   /** Its last few actions, newest first, for the agent sheet. */
-  steps: { text: string; at: number }[]
+  /** Newest first; `at` is unknown for steps read back from a conversation REDhelm did not watch. */
+  steps: { text: string; at?: number }[]
   /** The last thing it wrote while working, a sentence or two. */
   thinking?: string
   /** The agent it messaged and is waiting on, until it gets back to work. */

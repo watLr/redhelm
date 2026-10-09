@@ -558,3 +558,40 @@ describe('agents Claude Code no longer lists', () => {
   })
 })
 
+
+describe('agents that started before REDhelm', () => {
+  test('their sheet is filled from what Claude Code kept of their conversation', async ($: any, on: any) => {
+    on('agent.list', () => ({ value: [{ id: 'a9', name: 'review', description: 'Review the parser', type: 'general-purpose', status: 'running' }] }))
+    on('session.messages', (_$: any, e: any) => ({
+      value: e.agentId === 'a9'
+        ? [
+            { role: 'user', text: 'Check the parser for off-by-one errors', toolUses: [] },
+            { role: 'assistant', text: '', toolUses: [{ tool_use_id: 't1', tool: 'Read', input: { file_path: '/p/src/parser.ts' } }] },
+            { role: 'assistant', text: 'The loop bound looks wrong', toolUses: [{ tool_use_id: 't2', tool: 'Edit', input: { file_path: '/p/src/parser.ts' } }] },
+          ]
+        : { deny: 'not an agent' },
+    }))
+    await engine(on, true)($)
+    await clock.advance(3_000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const sheet = await openSheet($, ui, 'a9')
+    expect(await sheet.find({ type: 'Text', text: /off-by-one/ })).toBeDefined()
+    expect(await sheet.find({ type: 'Text', text: /Edit parser\.ts/ })).toBeDefined()
+    expect(await sheet.find({ type: 'Text', text: /loop bound/ })).toBeDefined()
+    expect(await sheet.find({ type: 'Text', text: /parser\.ts$/ })).toBeDefined() // Changed
+    await sheet.unmount()
+    await ui.unmount()
+  })
+
+  test('with no record to read, the sheet says so instead of showing empty fields', async ($: any, on: any) => {
+    on('agent.list', () => ({ value: [{ id: 'a8', type: 'general-purpose', description: '', status: 'running' }] }))
+    on('session.messages', () => ({ value: { deny: 'no transcript' } }))
+    await engine(on, true)($)
+    await clock.advance(3_000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const sheet = await openSheet($, ui, 'a8')
+    expect(await sheet.find({ type: 'Text', text: /started before REDhelm/ })).toBeDefined()
+    await sheet.unmount()
+    await ui.unmount()
+  })
+})

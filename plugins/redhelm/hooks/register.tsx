@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Agent, Guard, Note, Placement, SetupItem } from '../types'
-import { DEFAULTS, LINES, activity, capital, handleOf, handles, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
+import { DEFAULTS, LINES, activity, capital, fromConversation, type Said, handleOf, handles, base, changedFile, excerpt, kilo, kindOf, relative, remember, settings, short, span, staleTarget, type Settings } from './model'
 import { laneNames, workspaces, type Io } from './sources'
 import { Alert, Panel, Sheet, type Actions, type Els, type View } from './view'
 
@@ -99,6 +99,26 @@ async function io($: $): Promise<Io> {
   }
 }
 
+/** Agents whose conversation REDhelm has already read back, so each is read once. */
+const readBack = new Set<string>()
+
+/** Fills in an agent REDhelm did not watch from the start, from what Claude Code kept of its conversation. */
+async function backfill($: $, id: string) {
+  if (readBack.has(id)) return
+  readBack.add(id)
+  const said = await $.session.messages({ agentId: id })
+  if (!Array.isArray(said)) return
+  const got = fromConversation(said as Said[], root)
+  // What REDhelm saw itself wins; the conversation only fills what is missing.
+  await patch($, id, a => ({
+    brief: a.brief ?? got.brief,
+    thinking: a.thinking ?? got.thinking,
+    ...(!a.steps?.length && { steps: got.steps, recent: got.recent }),
+    ...(!a.files.length && { files: got.files, edits: got.edits }),
+    fails: a.fails || got.fails,
+  }))
+}
+
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 /** Merges the engine's agent list; writes only on change, and ticks the clock only while agents are live. */
@@ -133,6 +153,7 @@ async function sync($: $) {
   const current = (await $.state.get(AGENTS)).value ?? {}
   const merged = merge(current)
   if (!same(current, merged)) await update($, agents, merge)
+  for (const info of list) if (!current[info.id] && LIVE.has(info.status)) void quietly(() => backfill($, info.id))
   if (Object.values(merged).some(a => LIVE.has(a.status))) await update($, now, () => at)
 }
 
@@ -335,6 +356,7 @@ function actions($: $): Actions {
         await update($, briefOpen, () => false)
         await update($, inspecting, () => id)
         if (!id) return $.ui.close({ id: SHEET })
+        await quietly(() => backfill($, id))
         await $.ui.open({ id: SHEET, title: await nameOf($, id), focus: true, closeOnEscape: true, rows: 24 })
       })().catch(() => {}),
     toggleBrief: () => void update($, briefOpen, x => !x),

@@ -398,10 +398,13 @@ export function Sheet({ els, v, act, columns }: { els: Els; v: View; act: Action
             {a.steps.slice(0, 6).map((st, i) => (
               <Box key={`st-${i}`} justifyContent="space-between" gap={2}>
                 <Text wrap="truncate-end">{st.text}</Text>
-                <Text color="subtle">{ago(v.now - st.at)}</Text>
+                {st.at !== undefined && <Text color="subtle">{ago(v.now - st.at)}</Text>}
               </Box>
             ))}
           </Field>
+        )}
+        {!brief && !a.description && !a.steps?.length && !a.thinking && !a.answer && (
+          <Text color="subtle" wrap="wrap">This agent started before REDhelm, and Claude Code has no record of its work to show.</Text>
         )}
         {a.thinking && <Field els={els} name="Thinking"><Text color="subtle" wrap="wrap">{a.thinking}</Text></Field>}
         <Field els={els} name="Changed">
