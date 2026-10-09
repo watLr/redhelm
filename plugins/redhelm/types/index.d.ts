@@ -90,6 +90,8 @@ declare module 'claude-code' {
       usage: Usage
       /** Whether finished agents are listed or folded into one line. */
       showDone: boolean
+      /** A draft for Claude was set aside while you message an agent; it comes back after. */
+      aside: boolean
     }
   }
 }

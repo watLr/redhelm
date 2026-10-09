@@ -20,6 +20,7 @@ const USAGE = { plugin: 'redhelm', key: 'usage' } as const
 
 const agents = atom(AGENTS, {})
 const showDone = atom({ plugin: 'redhelm', key: 'showDone' } as const, false)
+const aside = atom({ plugin: 'redhelm', key: 'aside' } as const, false)
 const notes = atom({ plugin: 'redhelm', key: 'notes' } as const, [])
 const inbox = atom({ plugin: 'redhelm', key: 'inbox' } as const, [])
 const spaces = atom(WORKSPACES, [])
@@ -120,6 +121,8 @@ async function sync($: $) {
 
 /** The person's REDhelm settings (/config); a change there reloads the module with the new values. */
 let cfg: Settings = settings()
+/** A draft meant for Claude, held while you message an agent and put back after. */
+let setAside: string | undefined
 /** The session's project root (set at session start). */
 let root = ''
 /** Off in sessions nobody watches (claude -p, SDK, spawned runs): every hook passes straight through. */
@@ -308,9 +311,15 @@ function actions($: $): Actions {
     compose: id =>
       void (async () => {
         if (!id) return update($, composing, () => null)
-        const draft = (await $.prompt.read()).text.replace(ADDRESS, '$2')
-        const { isFilled } = await $.prompt.fill({ text: `→ ${handleOf((await $.state.get(AGENTS)).value?.[id])}: ${draft}`, mode: 'replace' })
-        if (isFilled) await update($, composing, () => id)
+        // What you were typing to Claude is set aside, never sent to the agent; it comes back after.
+        const text = (await $.prompt.read()).text
+        const already = text.match(ADDRESS)
+        if (!already && text.trim()) setAside = text
+        const { isFilled } = await $.prompt.fill({ text: `→ ${handleOf((await $.state.get(AGENTS)).value?.[id])}: ${already ? already[2] : ''}`, mode: 'replace' })
+        if (isFilled) {
+          await update($, composing, () => id)
+          await update($, aside, () => setAside !== undefined)
+        }
         else $.ui.toast('Could not reach the prompt; type → name: your message')
       })(),
     dismiss: messageId => void update($, inbox, list => list.filter(m => m.id !== messageId)),
@@ -343,6 +352,7 @@ async function view($: $): Promise<View> {
     composing: await read($, composing),
     setup: await read($, setup),
     showDone: await read($, showDone),
+    aside: await read($, aside),
     root,
     lanes: laneNames(list),
   }
@@ -436,6 +446,13 @@ export const register: Register = (on, options) => {
       if (!isDelivered) return { drop: `REDhelm: not delivered to ${name} (${reason ?? 'unknown reason'})` }
       await update($, inbox, list => list.filter(m => m.agentId !== to))
       await note($, { kind: 'reply', text: `you → ${name}: ${excerpt(text, 60)}`, agentId: to })
+      if (setAside !== undefined) {
+        const draft = setAside
+        setAside = undefined
+        await update($, aside, () => false)
+        // After Claude Code has cleared the prompt it just took.
+        $.clock.after(100, () => void $.prompt.fill({ text: draft, mode: 'replace' }))
+      }
       return { drop: `→ ${name}: sent` }
     }
     if (cfg.guard !== 'hold') return next(e)

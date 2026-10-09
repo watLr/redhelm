@@ -35,6 +35,8 @@ export type View = {
   composing: string | null
   setup: SetupItem[]
   showDone: boolean
+  /** Whether a draft for Claude was set aside while you message an agent. */
+  aside: boolean
   /** The session's project root, to tell this session's workflows from merely nearby ones. */
   root: string
   lanes: Record<string, string>
@@ -101,15 +103,22 @@ function ModelNotice({ els, g }: { els: Els; g: Guard }) {
 }
 
 /** After Reply or Message: say where to type, so nobody presses the button again. */
-function TypeHint({ els, a }: { els: Els; a: Agent }) {
+function TypeHint({ els, a, aside }: { els: Els; a: Agent; aside: boolean }) {
   const { Text } = els
-  return <Text color={C.attention} wrap="wrap">Your prompt now starts with “→ {handleOf(a)}:”. Type below and press Enter.</Text>
+  return (
+    <Text color={C.attention} wrap="wrap">
+      Your prompt now starts with “→ {handleOf(a)}:”. Type below and press Enter.{aside ? ' What you were typing comes back after you send.' : ''}
+    </Text>
+  )
 }
+
+/** "just now", "4 min ago" */
+const ago = (ms: number) => (ms < 60_000 ? 'just now' : `${minutes(ms)} ago`)
 
 function AgentActions({ els, s, v, act, primary }: { els: Els; s: Strip; v: View; act: Actions; primary: string }) {
   const { Box, Button } = els
   const a = s.agent
-  if (v.composing === a.id) return <TypeHint els={els} a={a} />
+  if (v.composing === a.id) return <TypeHint els={els} a={a} aside={v.aside} />
   return (
     <Box gap={3}>
       <Button key={`compose-${a.id}`} label={primary} variant="primary" onPress={() => act.compose(a.id)} />
@@ -118,14 +127,22 @@ function AgentActions({ els, s, v, act, primary }: { els: Els; s: Strip; v: View
   )
 }
 
-/** An agent that needs you: what it asks, and what you can do about it. */
+/** An agent that needs you: what it is working on, what it asks, and what you can do about it. */
 function NeedsCard({ els, s, v, act }: { els: Els; s: Strip; v: View; act: Actions }) {
   const { Box, Text } = els
+  const a = s.agent
   const ask = s.messages.at(-1)
+  const name = label(a, v.lanes)
+  const task = a.description && a.description.toLowerCase() !== name.toLowerCase() ? a.description : undefined
   return (
     <Box flexDirection="column" paddingLeft={2}>
-      <Text bold color={C.attention}>{label(s.agent, v.lanes)} {ask ? 'needs your answer' : 'is waiting for you'}</Text>
-      {ask && <Text wrap="wrap">“{excerpt(ask.text, 280)}”</Text>}
+      <Box justifyContent="space-between" gap={2}>
+        <Text bold color={C.attention}>{name} {ask ? 'needs your answer' : 'is waiting for you'}</Text>
+        {ask && <Text dimColor>{ago(v.now - ask.at)}</Text>}
+      </Box>
+      {task && <Text dimColor wrap="wrap">Working on: {task}</Text>}
+      {a.activity && <Text dimColor wrap="truncate-end">Was just: {a.activity}</Text>}
+      {ask && <Text wrap="wrap">“{ask.text.trim().slice(0, 800)}”</Text>}
       <AgentActions els={els} s={s} v={v} act={act} primary={ask ? 'Reply' : 'Message'} />
     </Box>
   )

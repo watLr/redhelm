@@ -135,8 +135,10 @@ const PANE = {
 } as const
 
 /** Beneath REDhelm: the engine's session, spawn and tools answer without running anything. */
+/** The mocked clock of the latest engine(), so a test can move time on. */
+let clock: any
 const engine = (on: any, isInteractive: boolean) => async ($: any) => {
-  mock.clock(on)
+  clock = mock.clock(on)
   mock.store(on)
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
@@ -213,7 +215,7 @@ describe('the pane', () => {
 describe('the rack', () => {
   test('orders strips by who needs you next and pulls out the ones that do', async () => {
     const v = {
-      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, root: '/p', lanes: {},
+      now: 0, notes: [], workspaces: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, root: '/p', lanes: {},
       agents: [
         agent({ id: 'run', startedAt: 1 }),
         agent({ id: 'done', status: 'completed', endedAt: 5 }),
@@ -401,7 +403,7 @@ describe('messaging an agent', () => {
 })
 
 describe('what REDhelm chooses to show', () => {
-  const base = { now: 0, notes: [], inbox: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, lanes: {} }
+  const base = { now: 0, notes: [], inbox: [], guard: {}, selected: null, composing: null, setup: [], showDone: false, aside: false, lanes: {} }
 
   test("only this session's workflows, or ones an agent here is changing; finished runs stay quiet", async () => {
     const ws = (dir: string, extra: object) => ({ dir, name: dir.split('/').pop()!, ...extra })
@@ -423,6 +425,44 @@ describe('what REDhelm chooses to show', () => {
     const two = agent({ id: 'a9b6863a', name: '', description: '' })
     expect([label(one, {}), label(two, {})]).toEqual(['Agent a169', 'Agent a9b6'])
     expect([handleOf(one), handleOf(two)]).toEqual(['agent a169', 'agent a9b6'])
+  })
+})
+
+describe('your draft is never sent to an agent', () => {
+  test('Message sets an existing draft aside and puts it back after the agent message is sent', async ($: any, on: any) => {
+    let box = 'a note I was writing to Claude'
+    const sent: any[] = []
+    on('prompt.read', () => ({ value: { text: box, cursor: box.length } }))
+    on('prompt.fill', (_: any, e: any) => ((box = e.text), { isFilled: true }))
+    on('prompt.submit', (_: any, e: any) => ({ text: e.text }))
+    on('session.send', (_: any, e: any) => (sent.push(e), { isDelivered: true }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'Rewrite the setup guide', subagentType: 'general-purpose', name: 'docs' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'sel-a1' })
+    await ui.press({ key: 'compose-a1' })
+    await new Promise<void>(r => setTimeout(() => r(), 40))
+    expect(box).toBe('→ docs: ')
+    await $.prompt.submit({ text: `${box}please also cover Windows` })
+    await clock.advance(200)
+    expect(sent.map(e => e.text)).toEqual(['please also cover Windows'])
+    expect(box).toBe('a note I was writing to Claude')
+    await ui.unmount()
+  })
+
+  test("a question's card says what the agent is working on and when it asked", async ($: any, on: any) => {
+    on('session.send', () => ({ isDelivered: true }))
+    on('agent.list', () => ({ value: [] }))
+    await engine(on, true)($)
+    await $.agent.spawn({ prompt: 'x', description: 'Choose colors for the settings page', subagentType: 'general-purpose', name: 'asker' })
+    await $.tool.call({ tool: 'Edit', file_path: 'src/Button.tsx', old_string: 'a', new_string: 'b', agentId: 'a1' })
+    await $.session.send({ to: 'lead', text: 'Should I use blue or green for the save button?', agentId: 'a1' })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /Asker needs your answer/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Working on: Choose colors for the settings page/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Was just: Edit Button\.tsx/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /just now/ })).toBeDefined()
+    await ui.unmount()
   })
 })
 
